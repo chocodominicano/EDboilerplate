@@ -23,7 +23,10 @@ async function request(method, url, body) {
     body: body !== undefined ? JSON.stringify(body) : undefined
   });
 
-  if (res.status === 401) {
+  // Un 401 de login/registro es un error normal del formulario (credenciales
+  // inválidas); solo los 401 de rutas autenticadas significan sesión expirada.
+  const isAuthAttempt = url.startsWith('/api/auth/login') || url.startsWith('/api/auth/register');
+  if (res.status === 401 && !isAuthAttempt) {
     // Sesión expirada: limpiar token PRIMERO y volver al login
     clearToken();
     window.dispatchEvent(new Event('cf:unauthorized'));

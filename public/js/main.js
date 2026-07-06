@@ -92,6 +92,45 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   }
 });
 
+// Alta de nuevos usuarios
+const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
+
+document.getElementById('show-register').addEventListener('click', (e) => {
+  e.preventDefault();
+  loginForm.classList.add('hidden');
+  registerForm.classList.remove('hidden');
+  document.getElementById('reg-user').focus();
+});
+
+document.getElementById('show-login').addEventListener('click', (e) => {
+  e.preventDefault();
+  registerForm.classList.add('hidden');
+  loginForm.classList.remove('hidden');
+});
+
+registerForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('register-error');
+  errEl.classList.add('hidden');
+  try {
+    const data = await apiPost('/api/auth/register', {
+      name: document.getElementById('reg-name').value.trim(),
+      username: document.getElementById('reg-user').value.trim(),
+      password: document.getElementById('reg-pass').value
+    });
+    setToken(data.token);
+    state.user = data.user;
+    document.getElementById('reg-pass').value = '';
+    registerForm.classList.add('hidden');
+    loginForm.classList.remove('hidden');
+    showApp();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+});
+
 // Logout: limpiar token PRIMERO (principio lockApp del documento)
 document.getElementById('logout-btn').addEventListener('click', () => {
   clearToken();

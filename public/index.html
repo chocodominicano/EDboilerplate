@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Centro Financiero</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E%F0%9F%92%A0%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/layout.css">
   <link rel="stylesheet" href="/css/components.css">
@@ -25,6 +26,25 @@
       <button type="submit" class="btn btn-primary btn-block">Entrar</button>
       <p id="login-error" class="login-error hidden"></p>
       <p class="muted small">Demo: <code>demo / 1234</code></p>
+      <p class="small"><a href="#" id="show-register">¿No tienes cuenta? Crear una</a></p>
+    </form>
+
+    <form id="register-form" class="login-card hidden" autocomplete="off">
+      <div class="login-logo">💠</div>
+      <h1>Crear cuenta</h1>
+      <p class="muted">Tus datos quedan solo en este servidor</p>
+      <label>Nombre
+        <input type="text" id="reg-name" placeholder="Tu nombre">
+      </label>
+      <label>Usuario
+        <input type="text" id="reg-user" required minlength="3" maxlength="30" autocomplete="username">
+      </label>
+      <label>Contraseña
+        <input type="password" id="reg-pass" required minlength="4" autocomplete="new-password">
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Crear cuenta y entrar</button>
+      <p id="register-error" class="login-error hidden"></p>
+      <p class="small"><a href="#" id="show-login">← Ya tengo cuenta</a></p>
     </form>
   </div>
 
