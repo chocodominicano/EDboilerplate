@@ -1,39 +1,80 @@
-![Logo EDboilerplate](https://ed.team/sites/default/files/EDboilerplate-logo.png)
+# 💠 Centro Financiero
 
-# EDboilerplate
+Aplicación web de **finanzas personales para República Dominicana**: controla en qué gastas tu
+dinero, tus fuentes de ingreso, tus tarjetas de crédito y todas tus deudas — 100% local y privada,
+sin conexión a bancos.
 
-Es una sencilla estructura para un proyecto web estático.
+## Características
 
-## Características de EDboilerplate:
+- 📊 **Dashboard** con KPIs del mes (balance, ingresos, gastos) y **resumen de todas tus deudas**
+  (tarjetas + préstamos, % de uso global, pago mínimo mensual total)
+- 💰 **Ingresos** por fuente y cuenta, con quincenas (Q1/Q2) e ingresos fijos recurrentes
+- 💸 **Gastos por categoría** con tags, moneda RD$/USD$, y 3 vistas: por mes, por ciclo de corte
+  de tarjeta, y gastos fijos con estado pagado/pendiente/vencido
+- 💳 **Tarjetas de crédito**: límites y saldos en RD$ y USD$, días de corte y pago, % de pago
+  mínimo configurable, barra de uso (con alerta al superar el límite). Los pagos de tarjeta se
+  registran como **transferencias** — nunca inflan tus gastos del mes
+- 🏦 **Préstamos** con amortización francesa: cuota calculada automáticamente, separación
+  interés/capital en cada pago
+- 📅 **Presupuesto mensual por categoría** con barras de progreso
+- 📡 **Radar financiero**: calendario del mes con todos tus compromisos (gastos fijos, ingresos
+  esperados, pagos de tarjetas, cuotas de préstamos) — marca ingresos como recibidos con un clic
+- 💱 Tasa USD/RD$ configurable manual o consultando al BCRD
+- 🔐 Multiusuario con JWT + bcrypt; los datos de cada usuario están aislados
 
-* Usa gulp para automatizar tareas
-* Esta basado en Sass, Pug y ES6.
-* Compila Sass con autoprefixer y muestra los cambios en tiempo real
-* Compila Pug y actualiza el navegador con cada cambio
-* Compila ES6 con soporte para módulos ES6 (importar y exportar modulos)
-* Detecta nuevos archivos añadidos al proyecto sin tener que reiniciar gulp
-* Captura errores en Sass, Pug y Js evitando que gulp se detenga.
-* Crea los sourcemaps de los archivos compilados
-* Tiene una estructura lista de estilos (con Sass) basada en SMACSS y ITCSS
-* Tiene una estructura lista para HTML (con Pug) que divide páginas e includes.
-* Tiene una estructura lista para importar y exportar modulos ES6
-* Optimiza y comprime imágenes
+## Stack
 
-## Modo de uso
+| Componente | Tecnología |
+|---|---|
+| Backend | Node.js + Express |
+| Base de datos | SQLite vía `better-sqlite3` (archivo `financiero.db`, auto-creado) |
+| Autenticación | JWT + bcryptjs |
+| Frontend | Vanilla HTML/CSS/JS con ES modules (sin build step) |
 
-1. Clone este repositorio (aun no tiene instalacion por npm o yeoman)
-2. Ejecute `npm install` (asegurese de tener npm actualizado y Nodejs en v6 como minimo)
-3. Ejecute `gulp dev` para trabajar e desarrollo
-4. Ejecute `gulp build` para compilar sus archivos para produccion
-5. Disfrute
+## Cómo correr
+
+```bash
+npm install
+cp .env.example .env   # opcional: define JWT_SECRET y PORT
+node server.js
+# Abre http://localhost:3000
+```
+
+Usuarios por defecto:
+
+| Usuario | Contraseña | Rol |
+|---|---|---|
+| `Admin` | `Admin` | admin |
+| `demo` | `1234` | user |
 
 ## Estructura
 
-1. La carpeta **src** contiene la estructura de archivos con la que trabajará
-2. La carpeta **public** contiene los archivos compilados que deberan llevarse a producción
-3. Para Sass importe sus partials desde `styles.scss`, el orden está indicado en el mismo archivo
-4. Para Pug, la carpeta `pages` contiene las paginas del proyecto y la carpeta `includes` los bloques.
-5. Para Js, la carpeta `modules` contiene los módulos que serán importados desde `index.js`
+```
+server.js          API Express (puerto 3000)
+db/                Esquema SQLite, conexión y seeds
+lib/               Dominio: fechas RD, amortización, ciclos de corte, tasa BCRD
+routes/            Endpoints REST (/api/...)
+public/            Frontend SPA (index.html + css/ + js/)
+financiero.db      Datos (gitignored — se crea al iniciar)
+```
 
-Siéntase libre de usarlo y de reportar cualquier problema que encuentre o sugerencia que tenga.
-EDboilerplate es gratis, open source y de la comunidad para la comunidad.
+## Comandos útiles
+
+```bash
+# Ver usuarios en la DB
+node -e "const db=require('better-sqlite3')('financiero.db'); console.table(db.prepare('SELECT id,username,role FROM users').all())"
+
+# Recrear DB limpia
+rm -f financiero.db* && node server.js
+
+# Probar el login
+curl -s localhost:3000/api/auth/login -X POST -H "Content-Type: application/json" \
+  -d '{"username":"Admin","password":"Admin"}'
+```
+
+## Principios de datos
+
+- Toda transacción lleva `fechaSort` (`yyyy-mm-dd`) — el filtrado por mes/quincena/ciclo depende de él
+- Los **pagos de tarjeta son transferencias**, no egresos: nunca suman al total de gastos
+- Las quincenas son independientes: Q1 = días 1–15, Q2 = días 16–fin de mes
+- Formato RD: `RD$1,200` sin decimales; fechas `DD/MM` en pantalla

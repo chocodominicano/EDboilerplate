@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Centro Financiero</title>
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/css/components.css">
+</head>
+<body>
+
+  <!-- Pantalla de login -->
+  <div id="login-screen" class="login-screen hidden">
+    <form id="login-form" class="login-card" autocomplete="off">
+      <div class="login-logo">💠</div>
+      <h1>Centro Financiero</h1>
+      <p class="muted">Tus finanzas personales, 100% privadas</p>
+      <label>Usuario
+        <input type="text" id="login-user" required autocomplete="username">
+      </label>
+      <label>Contraseña
+        <input type="password" id="login-pass" required autocomplete="current-password">
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+      <p id="login-error" class="login-error hidden"></p>
+      <p class="muted small">Demo: <code>demo / 1234</code></p>
+    </form>
+  </div>
+
+  <!-- Shell de la app -->
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">💠 <span>Centro Financiero</span></div>
+      <nav id="main-nav">
+        <a href="#/dashboard" data-route="dashboard">📊 <span>Dashboard</span></a>
+        <a href="#/ingresos" data-route="ingresos">💰 <span>Ingresos</span></a>
+        <a href="#/gastos" data-route="gastos">💸 <span>Gastos</span></a>
+        <a href="#/tarjetas" data-route="tarjetas">💳 <span>Tarjetas</span></a>
+        <a href="#/prestamos" data-route="prestamos">🏦 <span>Préstamos</span></a>
+        <a href="#/presupuesto" data-route="presupuesto">📅 <span>Presupuesto</span></a>
+        <a href="#/radar" data-route="radar">📡 <span>Radar</span></a>
+      </nav>
+    </aside>
+
+    <div class="main-col">
+      <header class="topbar">
+        <button id="rate-chip" class="chip" title="Tasa de cambio — clic para actualizar">USD$ 1 = RD$ …</button>
+        <div class="topbar-right">
+          <span id="topbar-user" class="muted"></span>
+          <button id="logout-btn" class="btn btn-ghost">Salir</button>
+        </div>
+      </header>
+      <main id="view"></main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
