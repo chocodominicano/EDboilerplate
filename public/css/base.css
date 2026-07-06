@@ -17,6 +17,13 @@
   --purple-soft: rgba(167, 139, 250, 0.15);
   --radius: 12px;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+
+  /* Paleta categórica del gráfico de deudas — validada para CVD y
+     contraste sobre --panel; el orden violeta→amarillo→azul evita
+     que violeta y azul queden adyacentes (trampa protán) */
+  --viz-tarjetas: #9085e9;
+  --viz-fijos: #c98500;
+  --viz-prestamos: #3987e5;
 }
 
 * {

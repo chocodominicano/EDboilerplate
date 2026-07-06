@@ -273,6 +273,102 @@ tr:last-child td { border-bottom: none; }
   flex-wrap: wrap;
 }
 
+/* ─── Visual consolidada de deudas ────────────────── */
+
+.debt-stack {
+  display: flex;
+  gap: 2px;
+  height: 26px;
+  margin: 0.75rem 0 0.6rem;
+}
+
+.debt-seg {
+  position: relative;
+  border-radius: 4px;
+  min-width: 6px;
+}
+
+.debt-seg .debt-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  z-index: 30;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.debt-seg:hover .debt-tip { display: block; }
+
+.debt-legend {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.debt-legend .chipbox {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 0.35rem;
+}
+
+.debt-cats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.debt-cat {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+}
+
+.debt-cat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.debt-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.6rem;
+  font-size: 0.83rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.debt-item:last-child { border-bottom: none; }
+
+.debt-item .bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.debt-item .bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
 /* ─── Calendario del radar ────────────────────────── */
 
 .cal-head, .cal-grid {

@@ -5,6 +5,67 @@ import { monthNavHTML, bindMonthNav } from '../monthnav.js';
 
 let month = null;
 
+const VIZ_COLORS = {
+  tarjetas: 'var(--viz-tarjetas)',
+  gastosFijos: 'var(--viz-fijos)',
+  prestamos: 'var(--viz-prestamos)'
+};
+
+// Visual consolidada: barra apilada parte-del-todo (orden fijo
+// tarjetas→fijos→préstamos) + leyenda con montos + desglose por ítem
+function debtBreakdown(dd) {
+  const cats = dd.porCategoria || [];
+  const total = dd.totalConsolidadoRD || 0;
+  if (total <= 0) {
+    return '<p class="empty-state" style="margin-top:0.75rem">🎉 Sin deudas ni compromisos pendientes este mes</p>';
+  }
+
+  const pctOf = (v) => (v / total) * 100;
+  const maxItem = Math.max(1, ...cats.flatMap((c) => c.items.map((i) => i.monto)));
+
+  const stack = cats.filter((c) => c.total > 0).map((c) => `
+    <div class="debt-seg" style="flex:${pctOf(c.total)};background:${VIZ_COLORS[c.key]}"
+         role="img" aria-label="${esc(c.label)}: ${fmtRD(c.total)} (${pctOf(c.total).toFixed(1)}%)">
+      <span class="debt-tip">${esc(c.label)} · <strong>${fmtRD(c.total)}</strong> · ${pctOf(c.total).toFixed(1)}%</span>
+    </div>`).join('');
+
+  const legend = cats.map((c) => `
+    <span class="${c.total > 0 ? '' : 'muted'}">
+      <i class="chipbox" style="background:${VIZ_COLORS[c.key]}"></i>${esc(c.label)}
+      <strong>${fmtRD(c.total)}</strong> <span class="muted">(${pctOf(c.total).toFixed(1)}%)</span>
+    </span>`).join('');
+
+  const catBlocks = cats.map((c) => {
+    const items = c.items.slice().sort((a, b) => b.monto - a.monto);
+    const shown = items.slice(0, 5);
+    const resto = items.length - shown.length;
+    return `
+      <div class="debt-cat">
+        <div class="debt-cat-head">
+          <span><i class="chipbox" style="background:${VIZ_COLORS[c.key]}"></i><strong>${esc(c.label)}</strong></span>
+          <span class="muted small">${fmtRD(c.total)}</span>
+        </div>
+        ${items.length === 0 ? '<p class="muted small">Sin pendientes</p>' : shown.map((i) => `
+          <div class="debt-item">
+            <span>${esc(i.label)}${i.estado === 'vencido' ? ' <span class="badge badge-danger">vencido</span>' : ''}</span>
+            <span class="right">${fmtRD(i.monto)}</span>
+            <span class="bar"><i style="width:${Math.max(2, (i.monto / maxItem) * 100)}%;background:${VIZ_COLORS[c.key]}"></i></span>
+          </div>`).join('')}
+        ${resto > 0 ? `<p class="muted small" style="margin-top:0.35rem">+${resto} más</p>` : ''}
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="margin-top:1.1rem">
+      <h3>Deudas consolidadas por categoría
+        <span class="muted small">· total ${fmtRD(total)} (incluye gastos fijos sin pagar del mes)</span>
+      </h3>
+      <div class="debt-stack">${stack}</div>
+      <div class="debt-legend">${legend}</div>
+      <div class="debt-cats">${catBlocks}</div>
+    </div>`;
+}
+
 export async function render(el) {
   if (!month) month = currentMonthKey();
   const d = await apiGet(`/api/dashboard?month=${month}`);
@@ -61,6 +122,7 @@ export async function render(el) {
           <div class="kpi-sub">mínimos de tarjetas + cuotas de préstamos</div>
         </div>
       </div>
+      ${debtBreakdown(dd)}
     </div>
 
     <div class="split-2">

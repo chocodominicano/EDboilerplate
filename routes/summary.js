@@ -41,20 +41,42 @@ router.get('/dashboard', (req, res) => {
     ORDER BY fecha_sort DESC, id DESC LIMIT 5
   `).all(userId).map(rowToTx);
 
-  // ── Resumen de todas las deudas: tarjetas + préstamos ──
+  // ── Resumen de todas las deudas: tarjetas + préstamos + fijos ──
   const cards = db.prepare('SELECT * FROM credit_cards WHERE user_id = ?').all(userId);
   let deudaTarjetasRD = 0;
   let limiteTarjetasRD = 0;
   let pagoMinTarjetas = 0;
+  const itemsTarjetas = [];
   for (const c of cards) {
-    deudaTarjetasRD += Math.max(0, c.used_rd) + Math.max(0, c.used_usd) * rate;
+    const deuda = Math.max(0, c.used_rd) + Math.max(0, c.used_usd) * rate;
+    deudaTarjetasRD += deuda;
     limiteTarjetasRD += c.limit_rd + c.limit_usd * rate;
-    pagoMinTarjetas += (Math.max(0, c.used_rd) + Math.max(0, c.used_usd) * rate) * c.pago_minimo_pct / 100;
+    pagoMinTarjetas += deuda * c.pago_minimo_pct / 100;
+    itemsTarjetas.push({ label: c.label, monto: round2(deuda) });
   }
 
   const loans = db.prepare('SELECT * FROM loans WHERE user_id = ? AND activo = 1 AND saldo_pendiente > 0').all(userId);
   const deudaPrestamos = loans.reduce((acc, l) => acc + l.saldo_pendiente, 0);
   const cuotasPrestamos = loans.reduce((acc, l) => acc + l.cuota_mensual, 0);
+  const itemsPrestamos = loans.map((l) => ({ label: l.nombre, monto: round2(l.saldo_pendiente) }));
+
+  // Gastos fijos del mes aún no pagados: compromisos vivos que cuentan
+  // en la visual consolidada de deudas
+  const hoyISO = todayLocalISO();
+  const itemsFijos = [];
+  let deudaFijos = 0;
+  for (const g of db.prepare('SELECT * FROM fixed_expenses WHERE user_id = ? AND activo = 1').all(userId)) {
+    let pagados = [];
+    try {
+      pagados = JSON.parse(g.pagados_meses || '[]');
+    } catch {
+      pagados = [];
+    }
+    if (pagados.includes(month)) continue;
+    const fecha = dateInMonth(month, g.dia);
+    deudaFijos += g.monto;
+    itemsFijos.push({ label: g.concepto, monto: g.monto, estado: fecha < hoyISO ? 'vencido' : 'pendiente' });
+  }
 
   res.json({
     month,
@@ -70,10 +92,17 @@ router.get('/dashboard', (req, res) => {
       totalDeudaRD: round2(deudaTarjetasRD + deudaPrestamos),
       deudaTarjetasRD: round2(deudaTarjetasRD),
       deudaPrestamosRD: round2(deudaPrestamos),
+      gastosFijosPendientesRD: round2(deudaFijos),
+      totalConsolidadoRD: round2(deudaTarjetasRD + deudaPrestamos + deudaFijos),
       usoGlobalPct: limiteTarjetasRD > 0 ? round2((deudaTarjetasRD / limiteTarjetasRD) * 100) : 0,
       pagoMinimoTotal: round2(pagoMinTarjetas + cuotasPrestamos),
       tarjetas: cards.length,
-      prestamos: loans.length
+      prestamos: loans.length,
+      porCategoria: [
+        { key: 'tarjetas', label: 'Tarjetas de crédito', total: round2(deudaTarjetasRD), items: itemsTarjetas },
+        { key: 'gastosFijos', label: 'Gastos fijos del mes', total: round2(deudaFijos), items: itemsFijos },
+        { key: 'prestamos', label: 'Préstamos', total: round2(deudaPrestamos), items: itemsPrestamos }
+      ]
     },
     exchangeRate
   });
