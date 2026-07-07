@@ -1,15 +1,18 @@
 const TOKEN_KEY = 'cf_token';
 
+// sessionStorage: el token se borra al cerrar el navegador — más seguro
+// en dispositivo compartido (decisión de diseño del documento del login)
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
 export function setToken(token) {
-  localStorage.setItem(TOKEN_KEY, token);
+  sessionStorage.setItem(TOKEN_KEY, token);
 }
 
 export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY); // limpia sesiones viejas de localStorage
 }
 
 async function request(method, url, body) {

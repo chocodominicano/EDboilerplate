@@ -5,15 +5,18 @@ import { toast, openModal, esc } from './ui.js';
 
 const loginScreen = document.getElementById('login-screen');
 const app = document.getElementById('app');
+const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
 
 let pillId = null; // usuario elegido desde una pill (login sin escribir usuario)
 
 function showLogin() {
   app.classList.add('hidden');
   loginScreen.classList.remove('hidden');
+  registerForm.classList.add('hidden');
+  loginForm.classList.remove('hidden');
   buildUserPills();
-  const user = document.getElementById('login-user');
-  if (user) user.focus();
+  document.getElementById('login-user').focus();
 }
 
 function showApp() {
@@ -32,8 +35,9 @@ async function buildUserPills() {
   try {
     const pills = await apiGet('/api/auth/pills');
     box.innerHTML = pills.map((p) => `
-      <button type="button" class="user-pill" data-pill="${p.id}" data-name="${esc(p.name)}" title="${esc(p.name)}">
-        ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : `<span>${esc(p.initials)}</span>`}
+      <button type="button" class="auth-av-pill" data-pill="${p.id}" data-name="${esc(p.name)}" title="${esc(p.name)}">
+        <span class="auth-av-circle">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : esc(p.initials)}</span>
+        <span class="auth-av-name">${esc(p.name.split(' ')[0])}</span>
       </button>`).join('');
     box.querySelectorAll('[data-pill]').forEach((b) => {
       b.onclick = () => selectUserPill(Number(b.dataset.pill), b.dataset.name);
@@ -45,7 +49,7 @@ async function buildUserPills() {
 
 function selectUserPill(id, name) {
   pillId = id;
-  document.querySelectorAll('.user-pill').forEach((p) => {
+  document.querySelectorAll('.auth-av-pill').forEach((p) => {
     p.classList.toggle('selected', Number(p.dataset.pill) === id);
   });
   document.getElementById('login-user-label').classList.add('hidden');
@@ -56,7 +60,7 @@ function selectUserPill(id, name) {
 
 function clearPillSelection() {
   pillId = null;
-  document.querySelectorAll('.user-pill').forEach((p) => p.classList.remove('selected'));
+  document.querySelectorAll('.auth-av-pill').forEach((p) => p.classList.remove('selected'));
   document.getElementById('login-user-label').classList.remove('hidden');
   document.getElementById('pill-selected').classList.add('hidden');
 }
@@ -65,6 +69,26 @@ document.getElementById('pill-clear').addEventListener('click', (e) => {
   e.preventDefault();
   clearPillSelection();
   document.getElementById('login-user').focus();
+});
+
+// ─── Toggle de visibilidad de contraseña (login y registro) ─
+
+document.querySelectorAll('[data-toggle]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const input = document.getElementById(btn.dataset.toggle);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? '🙈' : '👁';
+  });
+});
+
+// ─── Navegación con Enter (usuario → contraseña → submit) ──
+
+document.getElementById('login-user').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.getElementById('login-pass').focus();
+  }
 });
 
 // ─── Tasa de cambio ────────────────────────────────────────
@@ -121,16 +145,18 @@ document.getElementById('rate-chip').addEventListener('click', () => {
 
 // ─── Login ─────────────────────────────────────────────────
 
-const loginForm = document.getElementById('login-form');
-const registerForm = document.getElementById('register-form');
-
 loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const errEl = document.getElementById('login-error');
+  const btn = document.getElementById('login-btn');
   errEl.classList.add('hidden');
+
   const payload = { password: document.getElementById('login-pass').value };
   if (pillId) payload.pillId = pillId;
   else payload.username = document.getElementById('login-user').value.trim();
+
+  btn.disabled = true;
+  btn.textContent = 'Verificando…';
   try {
     const data = await apiPost('/api/auth/login', payload);
     setToken(data.token);
@@ -141,12 +167,16 @@ loginForm.addEventListener('submit', async (e) => {
   } catch (err) {
     errEl.textContent = err.message;
     errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ingresar →';
   }
 });
 
 // ─── Registro (queda pendiente de aprobación) ──────────────
 
 let regAvatarData = null;
+const regPreview = document.getElementById('reg-avatar-preview');
 
 document.getElementById('reg-avatar').addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -159,7 +189,14 @@ document.getElementById('reg-avatar').addEventListener('change', (e) => {
   const reader = new FileReader();
   reader.onload = (ev) => {
     regAvatarData = ev.target.result;
-    document.getElementById('reg-avatar-preview').innerHTML = `<img src="${regAvatarData}" alt="">`;
+    const emoji = regPreview.querySelector('span:first-of-type');
+    let img = regPreview.querySelector('img');
+    if (!img) {
+      img = document.createElement('img');
+      regPreview.insertBefore(img, regPreview.firstChild);
+    }
+    img.src = regAvatarData;
+    if (emoji) emoji.style.display = 'none';
   };
   reader.readAsDataURL(file);
 });
@@ -171,8 +208,9 @@ function checkPassMatch() {
   const el = document.getElementById('reg-pass-match');
   if (!p2) return el.classList.add('hidden');
   el.classList.remove('hidden');
-  el.textContent = p1 === p2 ? '✓ Las contraseñas coinciden' : '✗ Las contraseñas no coinciden';
-  el.className = `small ${p1 === p2 ? 'pos' : 'neg'}`;
+  const ok = p1 === p2;
+  el.textContent = ok ? '✓ Las contraseñas coinciden' : '✗ Las contraseñas no coinciden';
+  el.className = `auth-match ${ok ? 'ok' : 'bad'}`;
 }
 document.getElementById('reg-pass').addEventListener('input', checkPassMatch);
 document.getElementById('reg-pass2').addEventListener('input', checkPassMatch);
@@ -181,6 +219,9 @@ document.getElementById('show-register').addEventListener('click', (e) => {
   e.preventDefault();
   loginForm.classList.add('hidden');
   registerForm.classList.remove('hidden');
+  registerForm.classList.remove('auth-view');
+  void registerForm.offsetWidth; // reinicia la animación de entrada
+  registerForm.classList.add('auth-view');
   document.getElementById('reg-nombre').focus();
 });
 
@@ -188,12 +229,16 @@ document.getElementById('show-login').addEventListener('click', (e) => {
   e.preventDefault();
   registerForm.classList.add('hidden');
   loginForm.classList.remove('hidden');
+  loginForm.classList.remove('auth-view');
+  void loginForm.offsetWidth;
+  loginForm.classList.add('auth-view');
 });
 
 registerForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const errEl = document.getElementById('register-error');
   const okEl = document.getElementById('register-ok');
+  const btn = document.getElementById('register-btn');
   errEl.classList.add('hidden');
   okEl.classList.add('hidden');
 
@@ -204,6 +249,8 @@ registerForm.addEventListener('submit', async (e) => {
     return;
   }
 
+  btn.disabled = true;
+  btn.textContent = 'Creando…';
   try {
     const data = await apiPost('/api/auth/register', {
       nombre: document.getElementById('reg-nombre').value.trim(),
@@ -215,7 +262,10 @@ registerForm.addEventListener('submit', async (e) => {
     });
     registerForm.reset();
     regAvatarData = null;
-    document.getElementById('reg-avatar-preview').innerHTML = '📷';
+    const img = regPreview.querySelector('img');
+    if (img) img.remove();
+    const emoji = regPreview.querySelector('span:first-of-type');
+    if (emoji) emoji.style.display = '';
     document.getElementById('reg-pass-match').classList.add('hidden');
     okEl.textContent = data.message;
     okEl.classList.remove('hidden');
@@ -223,6 +273,9 @@ registerForm.addEventListener('submit', async (e) => {
   } catch (err) {
     errEl.textContent = err.message;
     errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Crear cuenta →';
   }
 });
 

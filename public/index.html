@@ -8,68 +8,138 @@
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/layout.css">
   <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/auth.css">
 </head>
 <body>
 
-  <!-- Pantalla de login -->
-  <div id="login-screen" class="login-screen hidden">
-    <form id="login-form" class="login-card" autocomplete="off">
-      <div class="login-logo">💠</div>
-      <h1>Centro Financiero</h1>
-      <p class="muted">Tus finanzas personales, 100% privadas</p>
-      <div id="user-pills" class="user-pills"></div>
-      <div id="pill-selected" class="pill-selected hidden">
-        <span id="pill-selected-name"></span>
-        <a href="#" id="pill-clear">usar otro usuario</a>
-      </div>
-      <label id="login-user-label">Usuario o correo
-        <input type="text" id="login-user" autocomplete="username">
-      </label>
-      <label>Contraseña
-        <input type="password" id="login-pass" required autocomplete="current-password">
-      </label>
-      <button type="submit" class="btn btn-primary btn-block">Entrar</button>
-      <p id="login-error" class="login-error hidden"></p>
-      <p class="muted small">Demo: <code>demo / 1234</code></p>
-      <p class="small"><a href="#" id="show-register">¿No tienes cuenta? Crear una</a></p>
-    </form>
+  <!-- Pantalla de login (split-screen) -->
+  <div id="login-screen" class="hidden">
+    <div class="auth-split">
 
-    <form id="register-form" class="login-card hidden" autocomplete="off">
-      <div class="login-logo">💠</div>
-      <h1>Crear cuenta</h1>
-      <p class="muted">La cuenta requiere aprobación del administrador</p>
-      <div class="avatar-picker">
-        <div id="reg-avatar-preview" class="avatar-circle">📷</div>
-        <label class="btn btn-sm" style="margin:0">Foto (opcional)
-          <input type="file" id="reg-avatar" accept="image/*" hidden>
-        </label>
+      <!-- Panel izquierdo: ilustración animada -->
+      <div class="auth-left">
+        <div class="auth-left-bg"></div>
+        <div class="auth-grid"></div>
+        <div class="auth-orb auth-orb-1"></div>
+        <div class="auth-orb auth-orb-2"></div>
+        <div class="auth-orb auth-orb-3"></div>
+
+        <div class="auth-cards">
+          <div class="auth-card-float">
+            <div class="acf-label">Balance del mes</div>
+            <div class="acf-val">+RD$27,180.00</div>
+            <div class="acf-sub">↑ 39.7% de ahorro</div>
+            <div class="acf-bar"><div class="acf-fill" style="width:78%;background:linear-gradient(90deg,#7c6fef,#2dd4a0)"></div></div>
+          </div>
+          <div class="auth-card-float">
+            <div class="acf-label">Visa ···4521 · Ciclo actual</div>
+            <div class="acf-val">RD$62,400.00</div>
+            <div class="acf-sub">78% del límite · Corte en 7 días</div>
+            <div class="acf-bar"><div class="acf-fill" style="width:78%;background:linear-gradient(90deg,#f06a50,#f0b429)"></div></div>
+          </div>
+        </div>
+
+        <div class="auth-copy">
+          <div class="auth-headline">Controla tu <span>dinero</span>, construye tu futuro.</div>
+          <div class="auth-desc">Todo tu control financiero en un solo lugar — gastos, tarjetas, préstamos y deudas. Sin conexión a bancos, sin filtraciones.</div>
+          <div class="auth-stats">
+            <div class="auth-stat"><div class="auth-stat-val">100%</div><div class="auth-stat-label">Privado</div></div>
+            <div class="auth-stat"><div class="auth-stat-val">Local</div><div class="auth-stat-label">Tu computadora</div></div>
+            <div class="auth-stat"><div class="auth-stat-val">0</div><div class="auth-stat-label">Bancos conectados</div></div>
+          </div>
+        </div>
       </div>
-      <div class="split-2" style="gap:0.6rem">
-        <label>Nombre
-          <input type="text" id="reg-nombre" required placeholder="Miguel">
-        </label>
-        <label>Apellido
-          <input type="text" id="reg-apellido" required placeholder="Pimentel">
-        </label>
+
+      <!-- Panel derecho: formularios -->
+      <div class="auth-right">
+
+        <!-- LOGIN -->
+        <form id="login-form" class="auth-view" autocomplete="off">
+          <div class="auth-logo">
+            <div class="auth-logo-mark">CF</div>
+            <div class="auth-logo-text">Centro Financiero</div>
+          </div>
+          <div class="auth-title">Bienvenido 👋</div>
+          <div class="auth-sub">Ingresa a tu cuenta para continuar</div>
+
+          <div class="auth-avatars" id="user-pills"></div>
+
+          <div id="pill-selected" class="auth-pill-selected hidden">
+            <strong id="pill-selected-name"></strong>
+            <a id="pill-clear">usar otro usuario</a>
+          </div>
+
+          <div class="auth-field" id="login-user-label">
+            <label class="auth-field-label">Usuario o correo</label>
+            <input type="text" id="login-user" class="auth-field-input" autocomplete="username">
+          </div>
+          <div class="auth-field">
+            <label class="auth-field-label">Contraseña</label>
+            <input type="password" id="login-pass" class="auth-field-input" required autocomplete="current-password">
+            <button type="button" class="auth-field-icon" data-toggle="login-pass" aria-label="Mostrar contraseña">👁</button>
+          </div>
+
+          <button type="submit" id="login-btn" class="auth-btn">Ingresar →</button>
+          <p id="login-error" class="auth-error hidden"></p>
+          <div class="auth-demo">Demo: <code>demo / 1234</code></div>
+          <div class="auth-link">¿No tienes cuenta? <a id="show-register">Regístrate</a></div>
+        </form>
+
+        <!-- REGISTRO -->
+        <form id="register-form" class="auth-view hidden" autocomplete="off">
+          <div class="auth-logo">
+            <div class="auth-logo-mark">CF</div>
+            <div class="auth-logo-text">Centro Financiero</div>
+          </div>
+          <div class="auth-title">Crear cuenta</div>
+          <div class="auth-sub">La cuenta requiere aprobación del administrador</div>
+
+          <div class="auth-avatar-picker">
+            <label class="auth-avatar-ring" id="reg-avatar-preview">
+              <span>📷</span>
+              <span class="auth-avatar-add">+</span>
+              <input type="file" id="reg-avatar" accept="image/*" hidden>
+            </label>
+          </div>
+
+          <div class="auth-grid2">
+            <div class="auth-field">
+              <label class="auth-field-label">Nombre</label>
+              <input type="text" id="reg-nombre" class="auth-field-input" required placeholder="Miguel">
+            </div>
+            <div class="auth-field">
+              <label class="auth-field-label">Apellido</label>
+              <input type="text" id="reg-apellido" class="auth-field-input" required placeholder="Pimentel">
+            </div>
+            <div class="auth-field full">
+              <label class="auth-field-label">Correo electrónico</label>
+              <input type="email" id="reg-email" class="auth-field-input" required placeholder="tu@correo.com" autocomplete="email">
+            </div>
+            <div class="auth-field full">
+              <label class="auth-field-label">Teléfono (opcional)</label>
+              <input type="text" id="reg-phone" class="auth-field-input" placeholder="809-555-0000">
+            </div>
+            <div class="auth-field">
+              <label class="auth-field-label">Contraseña</label>
+              <input type="password" id="reg-pass" class="auth-field-input" required minlength="4" autocomplete="new-password">
+              <button type="button" class="auth-field-icon" data-toggle="reg-pass" aria-label="Mostrar contraseña">👁</button>
+            </div>
+            <div class="auth-field">
+              <label class="auth-field-label">Confirmar</label>
+              <input type="password" id="reg-pass2" class="auth-field-input" required minlength="4" autocomplete="new-password">
+              <button type="button" class="auth-field-icon" data-toggle="reg-pass2" aria-label="Mostrar contraseña">👁</button>
+            </div>
+          </div>
+          <p id="reg-pass-match" class="auth-match hidden"></p>
+
+          <button type="submit" id="register-btn" class="auth-btn">Crear cuenta →</button>
+          <p id="register-error" class="auth-error hidden"></p>
+          <p id="register-ok" class="auth-ok hidden"></p>
+          <div class="auth-link"><a id="show-login">← Ya tengo cuenta</a></div>
+        </form>
+
       </div>
-      <label>Correo electrónico
-        <input type="email" id="reg-email" required placeholder="tu@correo.com" autocomplete="email">
-      </label>
-      <label>Teléfono (opcional)
-        <input type="text" id="reg-phone" placeholder="809-555-0000">
-      </label>
-      <label>Contraseña
-        <input type="password" id="reg-pass" required minlength="4" autocomplete="new-password">
-      </label>
-      <label>Confirmar contraseña
-        <input type="password" id="reg-pass2" required minlength="4" autocomplete="new-password">
-      </label>
-      <p id="reg-pass-match" class="small hidden"></p>
-      <button type="submit" class="btn btn-primary btn-block">Crear cuenta →</button>
-      <p id="register-error" class="login-error hidden"></p>
-      <p id="register-ok" class="small pos hidden"></p>
-      <p class="small"><a href="#" id="show-login">← Ya tengo cuenta</a></p>
-    </form>
+    </div>
   </div>
 
   <!-- Shell de la app -->
