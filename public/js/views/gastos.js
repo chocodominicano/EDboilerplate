@@ -3,8 +3,10 @@ import { esc, toast, confirmDialog } from '../ui.js';
 import { fmtRD, fmtMoney, fmtFechaDDMM, todayISO, currentMonthKey } from '../format.js';
 import { monthNavHTML, bindMonthNav } from '../monthnav.js';
 
-const CATEGORIAS = ['Comida', 'Transporte', 'Servicios', 'Salud', 'Entretenimiento',
+// Catálogos administrados desde el panel admin (con fallback si fallan)
+let CATEGORIAS = ['Comida', 'Transporte', 'Servicios', 'Salud', 'Entretenimiento',
   'Educación', 'Hogar', 'Ropa', 'Préstamos', 'Gastos fijos', 'Otros'];
+let METODOS = ['Efectivo', 'Transferencia', 'Débito'];
 
 let month = null;
 let tab = 'mes';
@@ -12,7 +14,12 @@ let cycleCard = '';
 
 export async function render(el) {
   if (!month) month = currentMonthKey();
-  const cards = await apiGet('/api/cards');
+  const [cards, catalog] = await Promise.all([
+    apiGet('/api/cards'),
+    apiGet('/api/catalog').catch(() => null)
+  ]);
+  if (catalog?.categories?.length) CATEGORIAS = catalog.categories;
+  if (catalog?.paymentMethods?.length) METODOS = catalog.paymentMethods;
   if (cycleCard && !cards.some((c) => c.key === cycleCard)) cycleCard = '';
   if (!cycleCard && cards.length > 0) cycleCard = cards[0].key;
 
@@ -39,9 +46,7 @@ export async function render(el) {
         </label>
         <label>Método de pago
           <select name="metodo">
-            <option value="Efectivo">Efectivo</option>
-            <option value="Transferencia">Transferencia</option>
-            <option value="Débito">Débito</option>
+            ${METODOS.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
             ${cards.map((c) => `<option value="cc:${esc(c.key)}">💳 ${esc(c.label)}</option>`).join('')}
           </select>
         </label>

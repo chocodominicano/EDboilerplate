@@ -1,3 +1,25 @@
+// Migración aditiva para DBs creadas con versiones anteriores del schema:
+// agrega columnas que falten en users sin tocar los datos existentes.
+// Los usuarios previos quedan status='active' para no bloquear a nadie.
+function migrate(db) {
+  const cols = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
+  const add = (name, ddl) => {
+    if (!cols.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${ddl}`);
+  };
+  add('email', 'email TEXT');
+  add('phone', 'phone TEXT');
+  add('avatar', 'avatar TEXT');
+  add('initials', 'initials TEXT');
+  add('nombre', 'nombre TEXT');
+  add('apellido', 'apellido TEXT');
+  add('status', "status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','pending','inactive'))");
+
+  // El índice de unicidad de email se crea aquí (no en createTables)
+  // porque en DBs viejas la columna email recién existe tras la migración
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+    ON users(lower(email)) WHERE email IS NOT NULL`);
+}
+
 function createTables(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -5,8 +27,33 @@ function createTables(db) {
       username TEXT NOT NULL UNIQUE COLLATE NOCASE,
       password_hash TEXT NOT NULL,
       name TEXT,
+      email TEXT,
+      phone TEXT,
+      avatar TEXT,
+      initials TEXT,
+      nombre TEXT,
+      apellido TEXT,
       role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','pending','inactive')),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS system_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      user TEXT,
+      event TEXT NOT NULL,
+      detail TEXT,
+      ip TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL UNIQUE COLLATE NOCASE
+    );
+
+    CREATE TABLE IF NOT EXISTS payment_methods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL UNIQUE COLLATE NOCASE
     );
 
     CREATE TABLE IF NOT EXISTS transactions (
@@ -116,4 +163,4 @@ function createTables(db) {
   `);
 }
 
-module.exports = { createTables };
+module.exports = { createTables, migrate };

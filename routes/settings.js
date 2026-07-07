@@ -5,6 +5,14 @@ const { fetchBcrdRate } = require('../lib/bcrd');
 
 const router = express.Router();
 
+// Catálogos para los formularios (cualquier usuario autenticado)
+router.get('/catalog', (req, res) => {
+  res.json({
+    categories: db.prepare('SELECT nombre FROM categories ORDER BY nombre').all().map((r) => r.nombre),
+    paymentMethods: db.prepare('SELECT nombre FROM payment_methods ORDER BY nombre').all().map((r) => r.nombre)
+  });
+});
+
 router.get('/settings', (req, res) => {
   const rows = db.prepare('SELECT key, value FROM settings WHERE user_id = ?').all(req.user.id);
   const out = {};

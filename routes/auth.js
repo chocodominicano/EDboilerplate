@@ -4,65 +4,140 @@ const jwt = require('jsonwebtoken');
 const db = require('../db/database');
 const { JWT_SECRET } = require('../lib/config');
 const { authRequired } = require('../middleware/auth');
+const { logEvent } = require('../lib/log');
 
 const router = express.Router();
 
-const findUser = db.prepare('SELECT * FROM users WHERE username = ?');
-const findUserById = db.prepare('SELECT id, username, name, role FROM users WHERE id = ?');
+const findByLogin = db.prepare(`
+  SELECT * FROM users
+  WHERE lower(username) = lower(?) OR lower(email) = lower(?)
+`);
+const findById = db.prepare('SELECT * FROM users WHERE id = ?');
+const findByUsername = db.prepare('SELECT id FROM users WHERE lower(username) = lower(?)');
+const findByEmail = db.prepare('SELECT id FROM users WHERE lower(email) = lower(?)');
+
+const MAX_AVATAR_CHARS = 400 * 1024; // ~300KB de imagen en base64
+
+function initialsOf(nombre, apellido, name) {
+  const a = (nombre || name || '?').trim();
+  const b = (apellido || '').trim();
+  return ((a[0] || '?') + (b[0] || (a.split(/\s+/)[1]?.[0] ?? ''))).toUpperCase();
+}
+
+function publicUser(u) {
+  return {
+    id: u.id,
+    name: u.name,
+    nombre: u.nombre,
+    apellido: u.apellido,
+    username: u.username,
+    email: u.email,
+    phone: u.phone,
+    avatar: u.avatar,
+    initials: u.initials || initialsOf(u.nombre, u.apellido, u.name),
+    role: u.role,
+    status: u.status
+  };
+}
+
+function issueToken(u) {
+  return jwt.sign({ sub: u.id, username: u.username, role: u.role }, JWT_SECRET, { expiresIn: '7d' });
+}
+
+// Username autogenerado: primera letra del nombre + apellido, sin tildes
+function generarUsername(nombre, apellido) {
+  const base = (String(nombre).trim()[0] + String(apellido).trim())
+    .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9._-]/g, '');
+  let candidato = base || 'usuario';
+  let n = 2;
+  while (findByUsername.get(candidato)) candidato = `${base}${n++}`;
+  return candidato;
+}
 
 router.post('/login', (req, res) => {
-  const { username, email, password } = req.body || {};
-  const login = username || email; // el doc original usaba "email" como campo de login
-  if (!login || !password) {
-    return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+  const b = req.body || {};
+  const password = String(b.password || '');
+
+  let user = null;
+  if (b.pillId) {
+    // Login desde una pill: el cliente solo conoce el id
+    user = findById.get(Number(b.pillId));
+  } else {
+    const login = String(b.username || b.email || '').trim();
+    if (!login || !password) return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+    user = findByLogin.get(login, login);
   }
-  const user = findUser.get(String(login));
-  if (!user || !bcrypt.compareSync(String(password), user.password_hash)) {
-    return res.status(401).json({ error: 'Credenciales inválidas' });
+
+  if (!user) return res.status(401).json({ error: 'Usuario no encontrado' });
+  if (user.status === 'pending') return res.status(401).json({ error: 'Cuenta pendiente de aprobación' });
+  if (user.status !== 'active') return res.status(401).json({ error: 'Cuenta inactiva' });
+  if (!bcrypt.compareSync(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Contraseña incorrecta' });
   }
-  const token = jwt.sign(
-    { sub: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-  res.json({
-    token,
-    user: { id: user.id, username: user.username, name: user.name, role: user.role }
+
+  logEvent(user.username, 'Login', `Inicio de sesión de ${user.name}`, req);
+  res.json({ ok: true, token: issueToken(user), user: publicUser(user) });
+});
+
+// Registro público: crea la cuenta en estado 'pending' — requiere
+// aprobación del administrador antes de poder entrar (no devuelve token)
+router.post('/register', (req, res) => {
+  const b = req.body || {};
+  const nombre = String(b.nombre || '').trim();
+  const apellido = String(b.apellido || '').trim();
+  const email = String(b.email || '').trim();
+  const password = String(b.password || '');
+
+  if (!nombre || !apellido) return res.status(400).json({ error: 'Nombre y apellido son requeridos' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Correo electrónico inválido' });
+  if (password.length < 4) return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
+  if (findByEmail.get(email)) return res.status(409).json({ error: 'Ese correo ya está registrado' });
+
+  let avatar = null;
+  if (b.avatar) {
+    avatar = String(b.avatar);
+    if (!avatar.startsWith('data:image/')) return res.status(400).json({ error: 'Avatar inválido' });
+    if (avatar.length > MAX_AVATAR_CHARS) return res.status(400).json({ error: 'La foto es muy grande (máximo ~300KB)' });
+  }
+
+  const username = generarUsername(nombre, apellido);
+  db.prepare(`
+    INSERT INTO users (username, password_hash, name, email, phone, avatar, initials, nombre, apellido, role, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'user', 'pending')
+  `).run(username, bcrypt.hashSync(password, 10), `${nombre} ${apellido}`, email,
+    b.phone ? String(b.phone).trim() : null, avatar, initialsOf(nombre, apellido), nombre, apellido);
+
+  logEvent(username, 'Registro de usuario', `${nombre} ${apellido} <${email}> — pendiente de aprobación`, req);
+  res.status(201).json({
+    ok: true,
+    username,
+    message: `¡Cuenta creada! Tu usuario es "${username}". Espera la aprobación del administrador para entrar.`
   });
 });
 
-// Alta de nuevos usuarios: crea cuenta rol 'user' y devuelve sesión iniciada
-router.post('/register', (req, res) => {
-  const b = req.body || {};
-  const username = String(b.username || '').trim();
-  if (!/^[a-zA-Z0-9._-]{3,30}$/.test(username)) {
-    return res.status(400).json({ error: 'El usuario debe tener 3-30 caracteres (letras, números, punto, guion)' });
-  }
-  const password = String(b.password || '');
-  if (password.length < 4) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
-  }
-  if (findUser.get(username)) {
-    return res.status(409).json({ error: 'Ese usuario ya existe' });
-  }
-
-  const info = db.prepare(
-    'INSERT INTO users (username, password_hash, name, role) VALUES (?, ?, ?, ?)'
-  ).run(username, bcrypt.hashSync(password, 10), b.name ? String(b.name).trim() : username, 'user');
-
-  const user = findUserById.get(info.lastInsertRowid);
-  const token = jwt.sign(
-    { sub: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-  res.status(201).json({ token, user });
+// Pills del login: solo datos de presentación de cuentas activas
+// (sin username, email, rol ni estado — privacidad primero)
+router.get('/pills', (req, res) => {
+  const rows = db.prepare(
+    "SELECT id, name, avatar, initials, nombre, apellido FROM users WHERE status = 'active' ORDER BY id"
+  ).all();
+  res.json(rows.map((u) => ({
+    id: u.id,
+    name: u.name,
+    initials: u.initials || initialsOf(u.nombre, u.apellido, u.name),
+    avatar: u.avatar
+  })));
 });
 
 router.get('/me', authRequired, (req, res) => {
-  const user = findUserById.get(req.user.id);
+  const user = findById.get(req.user.id);
   if (!user) return res.status(401).json({ error: 'Usuario no existe' });
-  res.json({ user });
+  res.json({ user: publicUser(user) });
 });
 
 module.exports = router;
+module.exports.publicUser = publicUser;
+module.exports.generarUsername = generarUsername;
+module.exports.initialsOf = initialsOf;
+module.exports.MAX_AVATAR_CHARS = MAX_AVATAR_CHARS;

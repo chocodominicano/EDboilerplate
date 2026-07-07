@@ -2,20 +2,19 @@ const path = require('path');
 const express = require('express');
 const { PORT } = require('./lib/config');
 const db = require('./db/database');
-const { createTables } = require('./db/schema');
 const { seed } = require('./db/seed');
 const { authRequired } = require('./middleware/auth');
 
-createTables(db);
 seed(db);
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '3mb' })); // avatares en base64
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/admin', authRequired, require('./routes/admin'));
 app.use('/api/transactions', authRequired, require('./routes/transactions'));
 app.use('/api/cards', authRequired, require('./routes/cards'));
 app.use('/api/loans', authRequired, require('./routes/loans'));

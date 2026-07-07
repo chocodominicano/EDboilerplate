@@ -5,8 +5,9 @@ import * as tarjetas from './views/tarjetas.js';
 import * as prestamos from './views/prestamos.js';
 import * as presupuesto from './views/presupuesto.js';
 import * as radar from './views/radar.js';
+import * as admin from './views/admin.js';
 
-const views = { dashboard, ingresos, gastos, tarjetas, prestamos, presupuesto, radar };
+const views = { dashboard, ingresos, gastos, tarjetas, prestamos, presupuesto, radar, admin };
 
 export function navigate(name) {
   location.hash = `#/${name}`;

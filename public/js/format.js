@@ -1,12 +1,12 @@
-// Localización RD: RD$1,200 sin decimales; fechas DD/MM en pantalla;
-// aritmética de fechas por string (nunca Date+ISO, RD es UTC-4).
+// Localización RD: montos siempre en formato 1,234.56 (2 decimales);
+// fechas DD/MM en pantalla; aritmética de fechas por string
+// (nunca Date+ISO, RD es UTC-4).
 
-const fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const fmt2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function fmtRD(n) {
-  const v = Math.round(Number(n) || 0);
-  return v < 0 ? `−RD$${fmt0.format(-v)}` : `RD$${fmt0.format(v)}`;
+  const v = Number(n) || 0;
+  return v < 0 ? `−RD$${fmt2.format(-v)}` : `RD$${fmt2.format(v)}`;
 }
 
 export function fmtUSD(n) {

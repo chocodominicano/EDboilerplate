@@ -3,14 +3,18 @@ import { esc, toast, confirmDialog, progressBar } from '../ui.js';
 import { fmtRD, currentMonthKey } from '../format.js';
 import { monthNavHTML, bindMonthNav } from '../monthnav.js';
 
-const CATEGORIAS = ['Comida', 'Transporte', 'Servicios', 'Salud', 'Entretenimiento',
+let CATEGORIAS = ['Comida', 'Transporte', 'Servicios', 'Salud', 'Entretenimiento',
   'Educación', 'Hogar', 'Ropa', 'Préstamos', 'Gastos fijos', 'Otros'];
 
 let month = null;
 
 export async function render(el) {
   if (!month) month = currentMonthKey();
-  const budgets = await apiGet(`/api/budgets?month=${month}`);
+  const [budgets, catalog] = await Promise.all([
+    apiGet(`/api/budgets?month=${month}`),
+    apiGet('/api/catalog').catch(() => null)
+  ]);
+  if (catalog?.categories?.length) CATEGORIAS = catalog.categories;
   const totalPresupuesto = budgets.reduce((a, b) => a + b.monto, 0);
   const totalGastado = budgets.reduce((a, b) => a + b.gastado, 0);
 

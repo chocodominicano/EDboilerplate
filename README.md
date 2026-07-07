@@ -21,6 +21,13 @@ sin conexión a bancos.
   esperados, pagos de tarjetas, cuotas de préstamos) — marca ingresos como recibidos con un clic
 - 💱 Tasa USD/RD$ configurable manual o consultando al BCRD
 - 🔐 Multiusuario con JWT + bcrypt; los datos de cada usuario están aislados
+- 🛡️ **Panel de administración** (solo rol admin): gestión de usuarios con flujo de
+  aprobación (las cuentas nuevas quedan pendientes hasta que el admin las active),
+  edición de datos/contraseña/rol/estado, catálogos de categorías y métodos de pago,
+  y logs de actividad del sistema
+- 👥 Registro público con foto de perfil opcional y username autogenerado; pills de
+  usuarios activos en el login (solo nombre e iniciales — privacidad primero)
+- 🔢 Montos siempre en formato `1,234.56` (2 decimales)
 
 ## Stack
 

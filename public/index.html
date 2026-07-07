@@ -17,8 +17,13 @@
       <div class="login-logo">💠</div>
       <h1>Centro Financiero</h1>
       <p class="muted">Tus finanzas personales, 100% privadas</p>
-      <label>Usuario
-        <input type="text" id="login-user" required autocomplete="username">
+      <div id="user-pills" class="user-pills"></div>
+      <div id="pill-selected" class="pill-selected hidden">
+        <span id="pill-selected-name"></span>
+        <a href="#" id="pill-clear">usar otro usuario</a>
+      </div>
+      <label id="login-user-label">Usuario o correo
+        <input type="text" id="login-user" autocomplete="username">
       </label>
       <label>Contraseña
         <input type="password" id="login-pass" required autocomplete="current-password">
@@ -32,18 +37,37 @@
     <form id="register-form" class="login-card hidden" autocomplete="off">
       <div class="login-logo">💠</div>
       <h1>Crear cuenta</h1>
-      <p class="muted">Tus datos quedan solo en este servidor</p>
-      <label>Nombre
-        <input type="text" id="reg-name" placeholder="Tu nombre">
+      <p class="muted">La cuenta requiere aprobación del administrador</p>
+      <div class="avatar-picker">
+        <div id="reg-avatar-preview" class="avatar-circle">📷</div>
+        <label class="btn btn-sm" style="margin:0">Foto (opcional)
+          <input type="file" id="reg-avatar" accept="image/*" hidden>
+        </label>
+      </div>
+      <div class="split-2" style="gap:0.6rem">
+        <label>Nombre
+          <input type="text" id="reg-nombre" required placeholder="Miguel">
+        </label>
+        <label>Apellido
+          <input type="text" id="reg-apellido" required placeholder="Pimentel">
+        </label>
+      </div>
+      <label>Correo electrónico
+        <input type="email" id="reg-email" required placeholder="tu@correo.com" autocomplete="email">
       </label>
-      <label>Usuario
-        <input type="text" id="reg-user" required minlength="3" maxlength="30" autocomplete="username">
+      <label>Teléfono (opcional)
+        <input type="text" id="reg-phone" placeholder="809-555-0000">
       </label>
       <label>Contraseña
         <input type="password" id="reg-pass" required minlength="4" autocomplete="new-password">
       </label>
-      <button type="submit" class="btn btn-primary btn-block">Crear cuenta y entrar</button>
+      <label>Confirmar contraseña
+        <input type="password" id="reg-pass2" required minlength="4" autocomplete="new-password">
+      </label>
+      <p id="reg-pass-match" class="small hidden"></p>
+      <button type="submit" class="btn btn-primary btn-block">Crear cuenta →</button>
       <p id="register-error" class="login-error hidden"></p>
+      <p id="register-ok" class="small pos hidden"></p>
       <p class="small"><a href="#" id="show-login">← Ya tengo cuenta</a></p>
     </form>
   </div>
@@ -60,6 +84,7 @@
         <a href="#/prestamos" data-route="prestamos">🏦 <span>Préstamos</span></a>
         <a href="#/presupuesto" data-route="presupuesto">📅 <span>Presupuesto</span></a>
         <a href="#/radar" data-route="radar">📡 <span>Radar</span></a>
+        <a href="#/admin" data-route="admin" id="nav-admin" class="hidden">🛡️ <span>Administración</span></a>
       </nav>
     </aside>
 
