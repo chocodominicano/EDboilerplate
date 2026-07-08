@@ -10,6 +10,83 @@ const router = express.Router();
 // Quincena efectiva: la elegida por el usuario o la derivada del día
 const QUINCENA_EXPR = 'COALESCE(quincena, CASE WHEN CAST(substr(fecha_sort, 9, 2) AS INTEGER) >= 16 THEN 2 ELSE 1 END)';
 
+// Resumen del módulo de Ingresos: 4 KPIs + contribución por fuente +
+// fuentes conocidas (para autocompletar). Todo computado en servidor.
+router.get('/ingresos/resumen', (req, res) => {
+  const month = req.query.month && isValidMonthKey(req.query.month) ? req.query.month : currentMonthKey();
+  const userId = req.user.id;
+  const rate = getExchangeRate(userId).rate;
+
+  const totalMes = round2(db.prepare(`
+    SELECT COALESCE(SUM(${MONTO_RD_EXPR}), 0) AS t
+    FROM transactions WHERE user_id = ? AND ${INGRESO_CLAUSE} AND fecha_sort LIKE ? || '%'
+  `).get(rate, userId, month).t);
+
+  const gastosMes = round2(db.prepare(`
+    SELECT COALESCE(SUM(${MONTO_RD_EXPR}), 0) AS t
+    FROM transactions WHERE user_id = ? AND ${GASTO_CLAUSE} AND fecha_sort LIKE ? || '%'
+  `).get(rate, userId, month).t);
+
+  const registros = db.prepare(
+    `SELECT COUNT(*) AS n FROM transactions WHERE user_id = ? AND ${INGRESO_CLAUSE} AND fecha_sort LIKE ? || '%'`
+  ).get(userId, month).n;
+
+  // Último ingreso del mes (más reciente por fecha)
+  const ultimoRow = db.prepare(`
+    SELECT monto_num, moneda, fecha_sort FROM transactions
+    WHERE user_id = ? AND ${INGRESO_CLAUSE} AND fecha_sort LIKE ? || '%'
+    ORDER BY fecha_sort DESC, id DESC LIMIT 1
+  `).get(userId, month);
+  const ultimo = ultimoRow
+    ? { montoNum: ultimoRow.monto_num, moneda: ultimoRow.moneda, fechaSort: ultimoRow.fecha_sort }
+    : null;
+
+  // Promedio de los últimos 3 meses COMPLETOS (excluye el mes en curso)
+  const prevMonths = db.prepare(`
+    SELECT substr(fecha_sort, 1, 7) AS mk, SUM(${MONTO_RD_EXPR}) AS total
+    FROM transactions
+    WHERE user_id = ? AND ${INGRESO_CLAUSE} AND fecha_sort < ? || '-01'
+    GROUP BY mk ORDER BY mk DESC LIMIT 3
+  `).all(rate, userId, month);
+  const promedio3 = prevMonths.length
+    ? round2(prevMonths.reduce((a, r) => a + r.total, 0) / prevMonths.length)
+    : 0;
+
+  // Tasa de ahorro del mes: (ingresos - gastos) / ingresos
+  const tasaAhorro = totalMes > 0 ? round2(((totalMes - gastosMes) / totalMes) * 100) : 0;
+
+  // Contribución por fuente (solo relevante con >1 fuente)
+  const porFuente = db.prepare(`
+    SELECT COALESCE(NULLIF(TRIM(fuente), ''), '(sin fuente)') AS fuente,
+           SUM(${MONTO_RD_EXPR}) AS total
+    FROM transactions WHERE user_id = ? AND ${INGRESO_CLAUSE} AND fecha_sort LIKE ? || '%'
+    GROUP BY fuente ORDER BY total DESC
+  `).all(rate, userId, month).map((r) => ({
+    fuente: r.fuente,
+    total: round2(r.total),
+    pct: totalMes > 0 ? round2((r.total / totalMes) * 100) : 0
+  }));
+
+  // Fuentes conocidas (para el datalist de autocompletar)
+  const fuentes = db.prepare(`
+    SELECT DISTINCT TRIM(fuente) AS f FROM transactions
+    WHERE user_id = ? AND ${INGRESO_CLAUSE} AND fuente IS NOT NULL AND TRIM(fuente) <> ''
+    ORDER BY f
+  `).all(userId).map((r) => r.f);
+
+  res.json({
+    month,
+    totalMes,
+    registros,
+    ultimo,
+    promedio3,
+    tasaAhorro,
+    deficit: totalMes > 0 && gastosMes > totalMes,
+    porFuente,
+    fuentes
+  });
+});
+
 router.get('/dashboard', (req, res) => {
   const month = req.query.month && isValidMonthKey(req.query.month) ? req.query.month : currentMonthKey();
   const userId = req.user.id;
