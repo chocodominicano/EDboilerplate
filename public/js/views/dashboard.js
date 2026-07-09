@@ -7,12 +7,13 @@ let month = null;
 
 const VIZ_COLORS = {
   tarjetas: 'var(--viz-tarjetas)',
+  cuotas: 'var(--viz-cuotas)',
   gastosFijos: 'var(--viz-fijos)',
   prestamos: 'var(--viz-prestamos)'
 };
 
 // Visual consolidada: barra apilada parte-del-todo (orden fijo
-// tarjetas→fijos→préstamos) + leyenda con montos + desglose por ítem
+// tarjetas→cuotas→fijos→préstamos) + leyenda con montos + desglose por ítem
 function debtBreakdown(dd) {
   const cats = dd.porCategoria || [];
   const total = dd.totalConsolidadoRD || 0;

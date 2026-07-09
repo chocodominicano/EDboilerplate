@@ -23,6 +23,8 @@
      que violeta y azul queden adyacentes (trampa protán). Revalidada
      contra el fondo púrpura y distinguible del acento (#7c6fef). */
   --viz-tarjetas: #9085e9;
+  --viz-cuotas: #199e70;
+  --viz-cuotas-soft: rgba(25, 158, 112, 0.15);
   --viz-fijos: #c98500;
   --viz-prestamos: #3987e5;
 }

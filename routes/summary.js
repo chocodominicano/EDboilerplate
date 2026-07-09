@@ -132,6 +132,18 @@ router.get('/dashboard', (req, res) => {
     itemsTarjetas.push({ label: c.label, monto: round2(deuda) });
   }
 
+  const installments = db.prepare(`
+    SELECT ci.*, cc.label AS card_label FROM card_installments ci
+    JOIN credit_cards cc ON cc.id = ci.card_id
+    WHERE ci.user_id = ? AND ci.saldo_pendiente > 0
+  `).all(userId);
+  const deudaCuotas = installments.reduce((acc, c) => acc + c.saldo_pendiente, 0);
+  const cuotasMensuales = installments.reduce((acc, c) => acc + c.cuota_mensual, 0);
+  const itemsCuotas = installments.map((c) => ({
+    label: `${c.descripcion} (${c.card_label})`,
+    monto: round2(c.saldo_pendiente)
+  }));
+
   const loans = db.prepare('SELECT * FROM loans WHERE user_id = ? AND activo = 1 AND saldo_pendiente > 0').all(userId);
   const deudaPrestamos = loans.reduce((acc, l) => acc + l.saldo_pendiente, 0);
   const cuotasPrestamos = loans.reduce((acc, l) => acc + l.cuota_mensual, 0);
@@ -166,17 +178,20 @@ router.get('/dashboard', (req, res) => {
     quincenas,
     ultimas5,
     deudas: {
-      totalDeudaRD: round2(deudaTarjetasRD + deudaPrestamos),
+      totalDeudaRD: round2(deudaTarjetasRD + deudaCuotas + deudaPrestamos),
       deudaTarjetasRD: round2(deudaTarjetasRD),
+      deudaCuotasRD: round2(deudaCuotas),
       deudaPrestamosRD: round2(deudaPrestamos),
       gastosFijosPendientesRD: round2(deudaFijos),
-      totalConsolidadoRD: round2(deudaTarjetasRD + deudaPrestamos + deudaFijos),
+      totalConsolidadoRD: round2(deudaTarjetasRD + deudaCuotas + deudaPrestamos + deudaFijos),
       usoGlobalPct: limiteTarjetasRD > 0 ? round2((deudaTarjetasRD / limiteTarjetasRD) * 100) : 0,
-      pagoMinimoTotal: round2(pagoMinTarjetas + cuotasPrestamos),
+      pagoMinimoTotal: round2(pagoMinTarjetas + cuotasMensuales + cuotasPrestamos),
       tarjetas: cards.length,
+      cuotas: installments.length,
       prestamos: loans.length,
       porCategoria: [
         { key: 'tarjetas', label: 'Tarjetas de crédito', total: round2(deudaTarjetasRD), items: itemsTarjetas },
+        { key: 'cuotas', label: 'Compras a cuotas', total: round2(deudaCuotas), items: itemsCuotas },
         { key: 'gastosFijos', label: 'Gastos fijos del mes', total: round2(deudaFijos), items: itemsFijos },
         { key: 'prestamos', label: 'Préstamos', total: round2(deudaPrestamos), items: itemsPrestamos }
       ]
@@ -237,6 +252,22 @@ router.get('/radar', (req, res) => {
       refId: c.id,
       label: `Pago ${c.label}`,
       monto: round2(pagoMin),
+      estado: 'programado'
+    });
+  }
+
+  const cuotasEventos = db.prepare(`
+    SELECT ci.*, cc.dia_pago AS card_dia_pago, cc.label AS card_label FROM card_installments ci
+    JOIN credit_cards cc ON cc.id = ci.card_id
+    WHERE ci.user_id = ? AND ci.saldo_pendiente > 0
+  `).all(userId);
+  for (const c of cuotasEventos) {
+    events.push({
+      dia: clampDay(c.card_dia_pago, y, m),
+      tipo: 'cuota_tarjeta',
+      refId: c.id,
+      label: `${c.descripcion} (${c.cuotas_pagadas + 1}/${c.num_cuotas}) — ${c.card_label}`,
+      monto: c.cuota_mensual,
       estado: 'programado'
     });
   }

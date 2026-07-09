@@ -41,7 +41,7 @@ export async function render(el) {
       </div>`);
   }
 
-  const totals = { gasto_fijo: 0, ingreso_fijo: 0, pago_tarjeta: 0, cuota_prestamo: 0 };
+  const totals = { gasto_fijo: 0, ingreso_fijo: 0, pago_tarjeta: 0, cuota_tarjeta: 0, cuota_prestamo: 0 };
   for (const ev of data.events) totals[ev.tipo] += ev.monto;
 
   el.innerHTML = `
@@ -54,6 +54,7 @@ export async function render(el) {
       <div class="kpi"><div class="kpi-label">Gastos fijos</div><div class="kpi-value">${fmtRD(totals.gasto_fijo)}</div></div>
       <div class="kpi"><div class="kpi-label">Ingresos esperados</div><div class="kpi-value pos">${fmtRD(totals.ingreso_fijo)}</div></div>
       <div class="kpi"><div class="kpi-label">Pagos mínimos tarjetas</div><div class="kpi-value">${fmtRD(totals.pago_tarjeta)}</div></div>
+      <div class="kpi"><div class="kpi-label">Cuotas de tarjeta</div><div class="kpi-value">${fmtRD(totals.cuota_tarjeta)}</div></div>
       <div class="kpi"><div class="kpi-label">Cuotas de préstamos</div><div class="kpi-value">${fmtRD(totals.cuota_prestamo)}</div></div>
     </div>
 
@@ -66,6 +67,7 @@ export async function render(el) {
         <span><i style="background:var(--amber)"></i>Gasto fijo</span>
         <span><i style="background:var(--green)"></i>Ingreso fijo (clic para marcar recibido)</span>
         <span><i style="background:var(--purple)"></i>Pago de tarjeta</span>
+        <span><i style="background:var(--viz-cuotas)"></i>Cuota de tarjeta</span>
         <span><i style="background:var(--accent)"></i>Cuota de préstamo</span>
       </div>
     </div>

@@ -151,6 +151,9 @@ router.put('/:id', (req, res) => {
   if (old.loan_id) {
     return res.status(400).json({ error: 'Los pagos de préstamo se gestionan desde el módulo de préstamos' });
   }
+  if (old.installment_id) {
+    return res.status(400).json({ error: 'Los pagos de cuota se gestionan desde el módulo de tarjetas' });
+  }
   if (old.is_pago_tarjeta) {
     return res.status(400).json({ error: 'Los pagos de tarjeta se gestionan desde el módulo de tarjetas' });
   }
@@ -181,6 +184,9 @@ router.delete('/:id', (req, res) => {
   if (!old) return res.status(404).json({ error: 'Transacción no existe' });
   if (old.loan_id) {
     return res.status(400).json({ error: 'Los pagos de préstamo se gestionan desde el módulo de préstamos' });
+  }
+  if (old.installment_id) {
+    return res.status(400).json({ error: 'Los pagos de cuota se gestionan desde el módulo de tarjetas' });
   }
 
   const remove = db.transaction(() => {

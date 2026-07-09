@@ -273,6 +273,30 @@ tr:last-child td { border-bottom: none; }
   flex-wrap: wrap;
 }
 
+.cc-pills {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.cc-pill {
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  border: 2px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.cc-pill.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ─── Pills de usuarios y avatares ────────────────── */
 
 .user-pills {
@@ -527,6 +551,7 @@ tr:last-child td { border-bottom: none; }
 .cal-event.ingreso_fijo { background: var(--green-soft); color: var(--green); }
 .cal-event.ingreso_fijo.clickable { cursor: pointer; }
 .cal-event.pago_tarjeta { background: var(--purple-soft); color: var(--purple); }
+.cal-event.cuota_tarjeta { background: var(--viz-cuotas-soft); color: var(--viz-cuotas); }
 .cal-event.cuota_prestamo { background: var(--accent-soft); color: var(--accent); }
 .cal-event.done { opacity: 0.45; text-decoration: line-through; }
 

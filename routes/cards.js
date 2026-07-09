@@ -1,9 +1,10 @@
 const express = require('express');
 const db = require('../db/database');
-const { isValidFechaSort, todayLocalISO, nextOccurrence, quincenaOf } = require('../lib/dates');
+const { isValidFechaSort, todayLocalISO, nextOccurrence, quincenaOf, currentMonthKey, isValidMonthKey, addMonthsToKey } = require('../lib/dates');
 const { cycleRange } = require('../lib/cycle');
 const { round2 } = require('../lib/amortization');
 const { getExchangeRate } = require('../lib/settings');
+const { GASTO_CLAUSE, MONTO_RD_EXPR } = require('../lib/tx');
 
 const router = express.Router();
 
@@ -96,6 +97,31 @@ function parseCardPayload(b) {
 router.get('/', (req, res) => {
   const rate = getExchangeRate(req.user.id).rate;
   res.json(listStmt.all(req.user.id).map((row) => serializeCard(row, rate)));
+});
+
+// Tendencia de gasto por tarjeta: mes actual vs mes anterior (para el tab Salud)
+router.get('/tendencia', (req, res) => {
+  const month = req.query.month && isValidMonthKey(req.query.month) ? req.query.month : currentMonthKey();
+  const prevMonth = addMonthsToKey(month, -1);
+  const rate = getExchangeRate(req.user.id).rate;
+
+  const sumFor = (m) => db.prepare(`
+    SELECT cc_key, COALESCE(SUM(${MONTO_RD_EXPR}), 0) AS total
+    FROM transactions
+    WHERE user_id = ? AND ${GASTO_CLAUSE} AND cc_key IS NOT NULL AND fecha_sort LIKE ? || '%'
+    GROUP BY cc_key
+  `).all(rate, req.user.id, m);
+
+  const actual = Object.fromEntries(sumFor(month).map((r) => [r.cc_key, round2(r.total)]));
+  const anterior = Object.fromEntries(sumFor(prevMonth).map((r) => [r.cc_key, round2(r.total)]));
+
+  const cards = listStmt.all(req.user.id);
+  res.json(cards.map((c) => ({
+    key: c.key,
+    label: c.label,
+    mesActual: actual[c.key] || 0,
+    mesAnterior: anterior[c.key] || 0
+  })));
 });
 
 router.post('/', (req, res) => {

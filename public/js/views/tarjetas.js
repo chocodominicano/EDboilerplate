@@ -1,29 +1,53 @@
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, openModal, progressBar, overLimitBadge } from '../ui.js';
-import { fmtRD, fmtUSD, fmtFechaDDMM, todayISO } from '../format.js';
+import { fmtRD, fmtUSD, fmtFechaDDMM, todayISO, currentMonthKey } from '../format.js';
+import { attachMoney, moneyToNum } from '../money.js';
+import { state } from '../state.js';
+
+const CARD_ACCENTS = ['#7c6fef', '#199e70', '#3987e5', '#c98500', '#e66767'];
+
+let tab = 'consumos';
+let consolidadoSel = null; // Map<key, bool> — null = aún no inicializado
 
 export async function render(el) {
   const cards = await apiGet('/api/cards');
-  const totalDeuda = cards.reduce((a, c) => a + c.deudaTotalRD, 0);
-  const totalPagoMin = cards.reduce((a, c) => a + c.pagoMinimoTotalRD, 0);
+
+  if (!consolidadoSel) consolidadoSel = new Map(cards.map((c) => [c.key, true]));
+  else for (const c of cards) if (!consolidadoSel.has(c.key)) consolidadoSel.set(c.key, true);
 
   el.innerHTML = `
     <div class="section-head">
       <h1>Tarjetas de crédito</h1>
-      <button id="add-card" class="btn btn-primary">＋ Nueva tarjeta</button>
+      ${tab === 'consumos' ? '<button id="add-card" class="btn btn-primary">＋ Nueva tarjeta</button>' : ''}
     </div>
 
-    ${cards.length > 1 ? `
-    <div class="kpis">
-      <div class="kpi"><div class="kpi-label">Deuda consolidada</div><div class="kpi-value neg">${fmtRD(totalDeuda)}</div></div>
-      <div class="kpi"><div class="kpi-label">Pago mínimo consolidado</div><div class="kpi-value">${fmtRD(totalPagoMin)}</div></div>
-      <div class="kpi"><div class="kpi-label">Tarjetas</div><div class="kpi-value">${cards.length}</div></div>
-    </div>` : ''}
+    <div class="tabs">
+      <button data-tab="consumos" class="${tab === 'consumos' ? 'active' : ''}">Consumos</button>
+      <button data-tab="cuotas" class="${tab === 'cuotas' ? 'active' : ''}">💳 Cuotas</button>
+      <button data-tab="salud" class="${tab === 'salud' ? 'active' : ''}">🩺 Salud crediticia</button>
+    </div>
 
+    <div id="tc-body"></div>
+  `;
+
+  el.querySelectorAll('[data-tab]').forEach((b) => {
+    b.onclick = () => { tab = b.dataset.tab; render(el); };
+  });
+
+  const body = el.querySelector('#tc-body');
+  if (tab === 'consumos') await renderConsumos(body, el, cards);
+  else if (tab === 'cuotas') await renderCuotas(body, el, cards);
+  else await renderSalud(body, el, cards);
+}
+
+// ─── Tab Consumos ────────────────────────────────────────────
+
+async function renderConsumos(body, viewEl, cards) {
+  body.innerHTML = `
     ${cards.length === 0 ? '<div class="card"><p class="empty-state">Registra tu primera tarjeta para empezar a controlarla</p></div>' : `
     <div class="cc-grid">
-      ${cards.map((c) => `
-        <div class="cc-card">
+      ${cards.map((c, i) => `
+        <div class="cc-card" style="border-left:3px solid ${CARD_ACCENTS[i % CARD_ACCENTS.length]}">
           <div class="cc-head">
             <strong>${esc(c.label)}</strong>
             <span class="cc-meta">${esc(c.bank || '')} ${esc(c.red || '')}</span>
@@ -55,15 +79,17 @@ export async function render(el) {
           </div>
         </div>`).join('')}
     </div>`}
+
+    ${cards.length > 1 ? consolidadoHTML(cards) : ''}
   `;
 
-  el.querySelector('#add-card').onclick = () => openCardForm(el, null);
+  viewEl.querySelector('#add-card').onclick = () => openCardForm(viewEl, null);
 
-  el.querySelectorAll('[data-edit]').forEach((b) => {
-    b.onclick = () => openCardForm(el, cards.find((c) => c.id === Number(b.dataset.edit)));
+  body.querySelectorAll('[data-edit]').forEach((b) => {
+    b.onclick = () => openCardForm(viewEl, cards.find((c) => c.id === Number(b.dataset.edit)));
   });
 
-  el.querySelectorAll('[data-del]').forEach((b) => {
+  body.querySelectorAll('[data-del]').forEach((b) => {
     const card = cards.find((c) => c.id === Number(b.dataset.del));
     b.onclick = async () => {
       const ok = await confirmDialog(
@@ -74,16 +100,56 @@ export async function render(el) {
       try {
         await apiDelete(`/api/cards/${card.id}`);
         toast('Tarjeta eliminada', 'success');
-        render(el);
+        render(viewEl);
       } catch (err) {
         toast(err.message, 'error');
       }
     };
   });
 
-  el.querySelectorAll('[data-pay]').forEach((b) => {
+  body.querySelectorAll('[data-pay]').forEach((b) => {
     const card = cards.find((c) => c.id === Number(b.dataset.pay));
-    b.onclick = () => openPayForm(el, card);
+    b.onclick = () => openPayForm(viewEl, card);
+  });
+
+  if (cards.length > 1) bindConsolidado(body, viewEl, cards);
+}
+
+function consolidadoHTML(cards) {
+  const rate = state.exchangeRate?.rate || 60;
+  const selKeys = cards.filter((c) => consolidadoSel.get(c.key) !== false);
+  const totalRD = selKeys.reduce((a, c) => a + c.usedRD, 0);
+  const totalUSD = selKeys.reduce((a, c) => a + c.usedUSD, 0);
+  const usdEnRD = totalUSD * rate;
+  const equiv = totalRD + usdEnRD;
+
+  return `
+    <div class="card">
+      <h2>Consolidado</h2>
+      <div class="cc-pills">
+        ${cards.map((c) => {
+          const sel = consolidadoSel.get(c.key) !== false;
+          return `<button type="button" class="cc-pill ${sel ? 'selected' : ''}" data-pill="${esc(c.key)}">
+            ${sel ? '✓' : '○'} ${esc(c.bank || c.label)} ···${esc((c.label.match(/\d{3,}$/) || [''])[0])}
+          </button>`;
+        }).join('')}
+      </div>
+      <div class="kpis" style="margin-top:0.75rem;margin-bottom:0">
+        <div class="kpi"><div class="kpi-label">Total RD$</div><div class="kpi-value">${fmtRD(totalRD)}</div></div>
+        <div class="kpi"><div class="kpi-label">Total USD$</div><div class="kpi-value">${fmtUSD(totalUSD)}</div></div>
+        <div class="kpi"><div class="kpi-label">USD → RD$ equiv.</div><div class="kpi-value">${fmtRD(usdEnRD)}</div></div>
+        <div class="kpi"><div class="kpi-label">Total equivalente</div><div class="kpi-value neg">${fmtRD(equiv)}</div></div>
+      </div>
+    </div>`;
+}
+
+function bindConsolidado(body, viewEl, cards) {
+  body.querySelectorAll('[data-pill]').forEach((b) => {
+    b.onclick = () => {
+      const key = b.dataset.pill;
+      consolidadoSel.set(key, !(consolidadoSel.get(key) !== false));
+      renderConsumos(body, viewEl, cards);
+    };
   });
 }
 
@@ -192,4 +258,292 @@ function openPayForm(viewEl, card) {
       toast(err.message, 'error');
     }
   };
+}
+
+// ─── Tab Cuotas ──────────────────────────────────────────────
+
+async function renderCuotas(body, viewEl, cards) {
+  const installments = await apiGet('/api/installments');
+
+  const activas = installments.filter((c) => !c.terminada);
+  const deudaRestante = activas.reduce((a, c) => a + c.saldoPendiente, 0);
+  const cuotaEsteMes = activas.reduce((a, c) => a + c.cuotaMensual, 0);
+  const totalOriginal = installments.reduce((a, c) => a + c.montoOriginal, 0);
+
+  body.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-label">Deuda restante</div><div class="kpi-value neg">${fmtRD(deudaRestante)}</div></div>
+      <div class="kpi"><div class="kpi-label">Cuota este mes</div><div class="kpi-value">${fmtRD(cuotaEsteMes)}</div></div>
+      <div class="kpi"><div class="kpi-label">Total original</div><div class="kpi-value">${fmtRD(totalOriginal)}</div></div>
+      <div class="kpi"><div class="kpi-label">Activas</div><div class="kpi-value">${activas.length}</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Agregar compra a cuotas</h2>
+      ${cards.length === 0 ? '<p class="empty-state">Registra una tarjeta primero</p>' : `
+      <form id="cuota-form" class="form-grid">
+        <label class="full">Tarjeta
+          <select name="cardId" required>${cards.map((c) => `<option value="${c.id}">${esc(c.label)}</option>`).join('')}</select>
+        </label>
+        <label>Descripción<input type="text" name="descripcion" required placeholder="MacBook Pro"></label>
+        <label>Ícono <input type="text" name="icono" placeholder="💻" maxlength="4"></label>
+        <label>Monto original<input type="text" name="montoOriginal" inputmode="decimal" required placeholder="0.00"></label>
+        <label># de cuotas<input type="number" name="numCuotas" min="1" required placeholder="12"></label>
+        <label>Tasa anual % <span class="muted small">(0 = sin interés)</span><input type="number" name="tasaAnual" step="0.1" min="0" value="0"></label>
+        <label>Fecha de la compra<input type="date" name="fechaInicio" value="${todayISO()}" required></label>
+        <button type="submit" class="btn btn-primary">＋ Agregar</button>
+      </form>`}
+    </div>
+
+    <div class="card">
+      <h2>Compras a cuotas</h2>
+      ${installments.length === 0 ? '<p class="empty-state">Sin compras a cuotas registradas</p>' : `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Compra</th><th>Tarjeta</th><th class="right">Cuota</th><th class="right">Saldo</th><th>Progreso</th><th>Próx. pago</th><th></th></tr></thead>
+        <tbody>
+          ${installments.map((c) => `
+            <tr>
+              <td>${esc(c.icono)} ${esc(c.descripcion)}${c.terminada ? ' <span class="badge badge-ok">saldada</span>' : ''}</td>
+              <td class="muted">${esc(c.cardLabel)}</td>
+              <td class="right">${fmtRD(c.cuotaMensual)}</td>
+              <td class="right ${c.terminada ? 'pos' : 'neg'}">${fmtRD(c.saldoPendiente)}</td>
+              <td style="min-width:140px">
+                <span class="small muted">${c.cuotasPagadas}/${c.numCuotas} cuotas</span>
+                ${progressBar(c.progresoPct)}
+              </td>
+              <td class="muted">${c.proximaCuotaFecha ? fmtFechaDDMM(c.proximaCuotaFecha) : '—'}</td>
+              <td style="white-space:nowrap">
+                ${!c.terminada ? `<button class="btn btn-sm btn-success" data-pay-cuota="${c.id}">Pagar</button>` : ''}
+                <button class="btn btn-sm" data-schedule="${c.id}" title="Ver amortización">📋</button>
+                <button class="btn btn-sm btn-ghost" data-del-cuota="${c.id}" title="Eliminar">🗑</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>`}
+    </div>
+  `;
+
+  const form = body.querySelector('#cuota-form');
+  if (form) {
+    attachMoney(form.montoOriginal);
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const monto = moneyToNum(form.montoOriginal);
+      if (monto <= 0) return toast('Monto inválido', 'error');
+      try {
+        await apiPost('/api/installments', {
+          cardId: Number(form.cardId.value),
+          descripcion: form.descripcion.value.trim(),
+          icono: form.icono.value.trim() || undefined,
+          montoOriginal: monto,
+          numCuotas: Number(form.numCuotas.value),
+          tasaAnual: Number(form.tasaAnual.value || 0),
+          fechaInicio: form.fechaInicio.value
+        });
+        toast('Compra a cuotas agregada', 'success');
+        render(viewEl);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  }
+
+  body.querySelectorAll('[data-pay-cuota]').forEach((b) => {
+    const ct = installments.find((c) => c.id === Number(b.dataset.payCuota));
+    b.onclick = async () => {
+      const ok = await confirmDialog(
+        `¿Registrar el pago de la cuota de <strong>${esc(ct.descripcion)}</strong> por ${fmtRD(ct.cuotaMensual)}?`,
+        { okLabel: 'Pagar cuota' }
+      );
+      if (!ok) return;
+      try {
+        const r = await apiPost(`/api/installments/${ct.id}/pay`, { fechaSort: todayISO() });
+        toast(`Cuota pagada: interés ${fmtRD(r.pago.interes)} + capital ${fmtRD(r.pago.capital)}`, 'success');
+        render(viewEl);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  });
+
+  body.querySelectorAll('[data-del-cuota]').forEach((b) => {
+    const ct = installments.find((c) => c.id === Number(b.dataset.delCuota));
+    b.onclick = async () => {
+      if (!await confirmDialog(`¿Eliminar la compra a cuotas <strong>${esc(ct.descripcion)}</strong>?`, { danger: true, okLabel: 'Eliminar' })) return;
+      try {
+        await apiDelete(`/api/installments/${ct.id}`);
+        render(viewEl);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  });
+
+  body.querySelectorAll('[data-schedule]').forEach((b) => {
+    const ct = installments.find((c) => c.id === Number(b.dataset.schedule));
+    b.onclick = () => openScheduleModal(ct);
+  });
+}
+
+async function openScheduleModal(ct) {
+  const { schedule } = await apiGet(`/api/installments/${ct.id}/schedule`);
+  const m = openModal(`
+    <h2>Amortización — ${esc(ct.descripcion)}</h2>
+    <p class="muted small">${esc(ct.cardLabel)} · ${fmtRD(ct.montoOriginal)} en ${ct.numCuotas} cuotas</p>
+    <div class="table-wrap" style="max-height:400px;overflow-y:auto">
+      <table>
+        <thead><tr><th>#</th><th>Fecha</th><th class="right">Cuota</th><th class="right">Interés</th><th class="right">Capital</th><th class="right">Saldo</th></tr></thead>
+        <tbody>
+          ${schedule.map((s) => `
+            <tr class="${s.pagada ? 'muted' : ''}">
+              <td>${s.n}${s.pagada ? ' ✓' : ''}</td>
+              <td>${fmtFechaDDMM(s.fecha)}</td>
+              <td class="right">${fmtRD(s.cuota)}</td>
+              <td class="right">${fmtRD(s.interes)}</td>
+              <td class="right">${fmtRD(s.capital)}</td>
+              <td class="right">${fmtRD(s.saldo)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="modal-actions"><button class="btn" data-act="close">Cerrar</button></div>
+  `);
+  m.el.querySelector('[data-act="close"]').onclick = m.close;
+}
+
+// ─── Tab Salud crediticia ────────────────────────────────────
+
+// Tolerancia de 1 centavo: cuando el pago mínimo es (en la práctica) igual
+// al interés del período, el redondeo de punto flotante puede dejarlo
+// unos centésimos por debajo sin que la deuda realmente amortice — sin
+// esta tolerancia el caso límite se detecta como "360 meses" en vez de
+// "nunca se liquida", justo el escenario que es crítico avisar al usuario.
+const EPSILON_NO_AMORTIZA = 0.01;
+
+function proyeccion12m(cc) {
+  const tasaMens = (cc.tasaInteres || 24) / 100 / 12;
+  const pagoMinPct = (cc.pagoMinimoPct || 5) / 100;
+
+  let saldo = cc.usedRD;
+  let intAnual = 0;
+  for (let m = 0; m < 12 && saldo > 0; m++) {
+    const intM = saldo * tasaMens;
+    const pagM = Math.max(saldo * pagoMinPct, 500);
+    if (pagM <= intM + EPSILON_NO_AMORTIZA) { intAnual = Infinity; break; }
+    const capM = Math.max(0, pagM - intM);
+    intAnual += intM;
+    saldo -= capM;
+  }
+
+  let saldoPay = cc.usedRD;
+  let totalIntFull = 0;
+  let mesesFull = 0;
+  while (saldoPay > 1 && mesesFull < 360) {
+    const iF = saldoPay * tasaMens;
+    const pF = Math.max(saldoPay * pagoMinPct, 500);
+    if (pF <= iF + EPSILON_NO_AMORTIZA) { mesesFull = Infinity; break; }
+    totalIntFull += iF;
+    saldoPay -= (pF - iF);
+    mesesFull++;
+  }
+  return { intAnual, totalIntFull, mesesFull };
+}
+
+async function renderSalud(body, viewEl, cards) {
+  if (cards.length === 0) {
+    body.innerHTML = '<div class="card"><p class="empty-state">Registra una tarjeta para ver su salud crediticia</p></div>';
+    return;
+  }
+
+  const month = currentMonthKey();
+  const tendencia = await apiGet(`/api/cards/tendencia?month=${month}`).catch(() => []);
+  const tendMap = new Map(tendencia.map((t) => [t.key, t]));
+
+  const deudaTotal = cards.reduce((a, c) => a + c.deudaTotalRD, 0);
+  const limiteTotal = cards.reduce((a, c) => a + c.limitRD + c.limitUSD, 0); // aproximado para KPI global
+  const intMesTotal = cards.reduce((a, c) => a + (c.usedRD * (c.tasaInteres / 100 / 12)), 0);
+  const pagoMinTotal = cards.reduce((a, c) => a + c.pagoMinimoTotalRD, 0);
+  const usoGlobal = cards.reduce((a, c) => a + c.limitRD, 0) > 0
+    ? (cards.reduce((a, c) => a + c.usedRD, 0) / cards.reduce((a, c) => a + c.limitRD, 0)) * 100
+    : 0;
+
+  body.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-label">Deuda total</div><div class="kpi-value neg">${fmtRD(deudaTotal)}</div></div>
+      <div class="kpi"><div class="kpi-label">% Uso global</div><div class="kpi-value">${usoGlobal.toFixed(1)}%${overLimitBadge(usoGlobal)}</div></div>
+      <div class="kpi"><div class="kpi-label">Intereses este mes</div><div class="kpi-value">${fmtRD(intMesTotal)}</div></div>
+      <div class="kpi"><div class="kpi-label">Pago mínimo total</div><div class="kpi-value">${fmtRD(pagoMinTotal)}</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Comparativa por tarjeta</h2>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Tarjeta</th><th class="right">Saldo</th><th class="right">Límite</th><th class="right">Uso</th>
+          <th class="right">Int. mes</th><th class="right">Pago mín.</th><th>Día pago</th><th>Día corte</th><th>Estado</th>
+        </tr></thead>
+        <tbody>
+          ${cards.map((c) => {
+            const intMes = c.usedRD * (c.tasaInteres / 100 / 12);
+            const estado = c.usoPctRD > 100
+              ? '<span class="badge badge-danger">⚠ Límite superado</span>'
+              : (c.alertaRD && c.usedRD >= c.alertaRD ? '<span class="badge badge-warn">⚠ Alerta</span>' : '<span class="badge badge-ok">✓ Normal</span>');
+            return `<tr>
+              <td>${esc(c.label)}</td>
+              <td class="right">${fmtRD(c.usedRD)}</td>
+              <td class="right">${fmtRD(c.limitRD)}</td>
+              <td class="right">${c.usoPctRD}%</td>
+              <td class="right">${fmtRD(intMes)}</td>
+              <td class="right">${fmtRD(c.pagoMinimoTotalRD)}</td>
+              <td>${c.diaPago}</td>
+              <td>${c.diaCorte}</td>
+              <td>${estado}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h2>Proyección pagando solo el mínimo</h2>
+      <p class="muted small">Qué pasa si solo pagas el pago mínimo cada mes, sin nuevos consumos.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Tarjeta</th><th class="right">Interés 12 meses</th><th class="right">Interés total hasta liquidar</th><th>Tiempo para liquidar</th></tr></thead>
+        <tbody>
+          ${cards.filter((c) => c.usedRD > 0).map((c) => {
+            const p = proyeccion12m(c);
+            const infinito = !Number.isFinite(p.mesesFull);
+            return `<tr>
+              <td>${esc(c.label)}</td>
+              <td class="right">${fmtRD(p.intAnual)}</td>
+              <td class="right ${infinito ? 'neg' : ''}">${infinito ? '∞' : fmtRD(p.totalIntFull)}</td>
+              <td class="${infinito ? 'neg' : ''}">${infinito
+                ? '⚠ Nunca se liquida — el mínimo no cubre el interés'
+                : `${p.mesesFull} meses (${(p.mesesFull / 12).toFixed(1)} años)`}</td>
+            </tr>`;
+          }).join('')}
+          ${cards.every((c) => c.usedRD <= 0) ? '<tr><td colspan="4" class="empty-state">Sin saldo pendiente en RD$</td></tr>' : ''}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h2>Tendencia: mes actual vs anterior</h2>
+      ${cards.map((c) => {
+        const t = tendMap.get(c.key) || { mesActual: 0, mesAnterior: 0 };
+        const max = Math.max(t.mesActual, t.mesAnterior, 1);
+        const delta = t.mesAnterior > 0 ? ((t.mesActual - t.mesAnterior) / t.mesAnterior) * 100 : (t.mesActual > 0 ? 100 : 0);
+        return `
+          <div style="margin-bottom:0.9rem">
+            <div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-bottom:0.25rem">
+              <span>${esc(c.label)}</span>
+              <span class="${delta > 0 ? 'neg' : 'pos'}">${delta > 0 ? '↑' : '↓'} ${Math.abs(delta).toFixed(0)}%</span>
+            </div>
+            <div class="small muted">Este mes: ${fmtRD(t.mesActual)} · Mes anterior: ${fmtRD(t.mesAnterior)}</div>
+            <div class="progress"><i style="width:${(t.mesActual / max) * 100}%;background:var(--accent)"></i></div>
+            <div class="progress"><i style="width:${(t.mesAnterior / max) * 100}%;background:var(--muted)"></i></div>
+          </div>`;
+      }).join('')}
+    </div>
+  `;
 }

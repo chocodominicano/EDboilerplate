@@ -18,6 +18,11 @@ function migrate(db) {
   // porque en DBs viejas la columna email recién existe tras la migración
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
     ON users(lower(email)) WHERE email IS NOT NULL`);
+
+  const txCols = new Set(db.prepare('PRAGMA table_info(transactions)').all().map((c) => c.name));
+  if (!txCols.has('installment_id')) {
+    db.exec('ALTER TABLE transactions ADD COLUMN installment_id INTEGER');
+  }
 }
 
 function createTables(db) {
@@ -77,6 +82,7 @@ function createTables(db) {
       cc_key TEXT,
       cc_is_usd INTEGER NOT NULL DEFAULT 0,
       loan_id INTEGER,
+      installment_id INTEGER,
       fixed_expense_id INTEGER,
       fixed_income_id INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -105,6 +111,23 @@ function createTables(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(user_id, key)
     );
+
+    CREATE TABLE IF NOT EXISTS card_installments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      card_id INTEGER NOT NULL REFERENCES credit_cards(id) ON DELETE CASCADE,
+      descripcion TEXT NOT NULL,
+      icono TEXT,
+      monto_original REAL NOT NULL CHECK(monto_original > 0),
+      num_cuotas INTEGER NOT NULL CHECK(num_cuotas > 0),
+      tasa_anual REAL NOT NULL DEFAULT 0,
+      cuota_mensual REAL NOT NULL,
+      fecha_inicio TEXT NOT NULL,
+      saldo_pendiente REAL NOT NULL,
+      cuotas_pagadas INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_installments_card ON card_installments(card_id);
 
     CREATE TABLE IF NOT EXISTS loans (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
