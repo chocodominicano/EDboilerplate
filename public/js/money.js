@@ -36,14 +36,18 @@ export function attachMoney(input) {
   input.addEventListener('input', () => {
     const raw = input.value;
     const caret = input.selectionStart ?? raw.length;
-    const digitsBefore = raw.slice(0, caret).replace(/[^0-9]/g, '').length;
+    // Cuenta dígitos Y el punto decimal antes del cursor (no solo dígitos):
+    // si el usuario acaba de escribir '.', debe contar para que el cursor
+    // quede DESPUÉS del punto y no antes — si no, los dígitos que siguen
+    // se insertan en la parte entera en vez de en los decimales
+    // (ej. "49.99" terminaba como "4999").
+    const charsBefore = raw.slice(0, caret).replace(/[^0-9.]/g, '').length;
     const formatted = formatWhileTyping(raw);
     input.value = formatted;
-    // reubica el cursor tras la misma cantidad de dígitos
     let pos = 0;
     let seen = 0;
-    while (pos < formatted.length && seen < digitsBefore) {
-      if (/[0-9]/.test(formatted[pos])) seen++;
+    while (pos < formatted.length && seen < charsBefore) {
+      if (/[0-9.]/.test(formatted[pos])) seen++;
       pos++;
     }
     try {

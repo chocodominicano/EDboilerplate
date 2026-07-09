@@ -87,6 +87,58 @@ router.get('/ingresos/resumen', (req, res) => {
   });
 });
 
+// Resumen del módulo de Gastos: KPIs (total RD$/USD$, balance disponible,
+// # transacciones) + desglose por categoría para el modal de "Total del mes".
+router.get('/gastos/resumen', (req, res) => {
+  const month = req.query.month && isValidMonthKey(req.query.month) ? req.query.month : currentMonthKey();
+  const userId = req.user.id;
+  const rate = getExchangeRate(userId).rate;
+
+  const totalRD = round2(db.prepare(`
+    SELECT COALESCE(SUM(monto_num), 0) AS t FROM transactions
+    WHERE user_id = ? AND ${GASTO_CLAUSE} AND moneda = 'RD$' AND fecha_sort LIKE ? || '%'
+  `).get(userId, month).t);
+
+  const totalUSD = round2(db.prepare(`
+    SELECT COALESCE(SUM(monto_num), 0) AS t FROM transactions
+    WHERE user_id = ? AND ${GASTO_CLAUSE} AND moneda = 'USD$' AND fecha_sort LIKE ? || '%'
+  `).get(userId, month).t);
+
+  const ingresosMes = round2(db.prepare(`
+    SELECT COALESCE(SUM(${MONTO_RD_EXPR}), 0) AS t FROM transactions
+    WHERE user_id = ? AND ${INGRESO_CLAUSE} AND fecha_sort LIKE ? || '%'
+  `).get(rate, userId, month).t);
+
+  const txCount = db.prepare(
+    `SELECT COUNT(*) AS n FROM transactions WHERE user_id = ? AND ${GASTO_CLAUSE} AND fecha_sort LIKE ? || '%'`
+  ).get(userId, month).n;
+
+  const usdEnRD = round2(totalUSD * rate);
+  const totalEquivRD = round2(totalRD + usdEnRD);
+
+  const porCategoria = db.prepare(`
+    SELECT COALESCE(NULLIF(TRIM(cat), ''), '(sin categoría)') AS cat,
+           SUM(${MONTO_RD_EXPR}) AS total
+    FROM transactions WHERE user_id = ? AND ${GASTO_CLAUSE} AND fecha_sort LIKE ? || '%'
+    GROUP BY cat ORDER BY total DESC
+  `).all(rate, userId, month).map((r) => ({
+    cat: r.cat,
+    total: round2(r.total),
+    pct: totalEquivRD > 0 ? round2((r.total / totalEquivRD) * 100) : 0
+  }));
+
+  res.json({
+    month,
+    totalRD,
+    totalUSD,
+    usdEnRD,
+    totalEquivRD,
+    txCount,
+    balance: round2(ingresosMes - totalEquivRD),
+    porCategoria
+  });
+});
+
 router.get('/dashboard', (req, res) => {
   const month = req.query.month && isValidMonthKey(req.query.month) ? req.query.month : currentMonthKey();
   const userId = req.user.id;
