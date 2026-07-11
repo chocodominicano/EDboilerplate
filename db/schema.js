@@ -23,6 +23,11 @@ function migrate(db) {
   if (!txCols.has('installment_id')) {
     db.exec('ALTER TABLE transactions ADD COLUMN installment_id INTEGER');
   }
+
+  const loanCols = new Set(db.prepare('PRAGMA table_info(loans)').all().map((c) => c.name));
+  if (!loanCols.has('penalidad_pct')) {
+    db.exec("ALTER TABLE loans ADD COLUMN penalidad_pct REAL NOT NULL DEFAULT 0");
+  }
 }
 
 function createTables(db) {
@@ -142,6 +147,7 @@ function createTables(db) {
       fecha_inicio TEXT NOT NULL,
       saldo_pendiente REAL NOT NULL,
       cuotas_pagadas INTEGER NOT NULL DEFAULT 0,
+      penalidad_pct REAL NOT NULL DEFAULT 0,
       activo INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

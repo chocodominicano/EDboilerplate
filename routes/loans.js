@@ -1,16 +1,53 @@
 const express = require('express');
 const db = require('../db/database');
 const { isValidFechaSort, todayLocalISO, quincenaOf, addMonthsToKey, dateInMonth, monthKey } = require('../lib/dates');
-const { frenchPayment, splitCuota, round2 } = require('../lib/amortization');
+const { frenchPayment, splitCuota, round2, RESIDUO_SALDO } = require('../lib/amortization');
 
 const router = express.Router();
 
 const findById = db.prepare('SELECT * FROM loans WHERE user_id = ? AND id = ?');
 const listStmt = db.prepare('SELECT * FROM loans WHERE user_id = ? ORDER BY created_at');
+const sumPagosStmt = db.prepare(
+  'SELECT COALESCE(SUM(monto_num), 0) AS total, COUNT(*) AS n FROM transactions WHERE user_id = ? AND loan_id = ?'
+);
 
-function serializeLoan(row) {
-  // La primera cuota vence un mes después del inicio, en el día de pago
+// Meses restantes con la cuota actual, por simulación (los abonos extra
+// hacen que plazo_meses - cuotas_pagadas deje de ser confiable)
+function mesesRestantes(saldo, tasaAnual, cuota) {
+  const i = tasaAnual / 100 / 12;
+  let s = saldo;
+  let meses = 0;
+  while (s > RESIDUO_SALDO && meses < 600) {
+    const interes = s * i;
+    if (cuota <= interes + 0.01) return Infinity;
+    s -= (cuota - interes);
+    meses++;
+  }
+  return meses;
+}
+
+// Interés total que falta por pagar con la cuota actual
+function interesRestante(saldo, tasaAnual, cuota) {
+  const i = tasaAnual / 100 / 12;
+  let s = saldo;
+  let interes = 0;
+  let meses = 0;
+  while (s > RESIDUO_SALDO && meses < 600) {
+    const int = s * i;
+    if (cuota <= int + 0.01) return Infinity;
+    interes += int;
+    s -= (cuota - int);
+    meses++;
+  }
+  return round2(interes);
+}
+
+function serializeLoan(row, userId) {
   const nextKey = addMonthsToKey(monthKey(row.fecha_inicio), row.cuotas_pagadas + 1);
+  const pagos = sumPagosStmt.get(userId, row.id);
+  // Interés/cargos pagados = todo lo desembolsado menos lo que bajó el capital
+  const capitalAmortizado = round2(row.original - row.saldo_pendiente);
+  const interesPagado = round2(Math.max(0, pagos.total - capitalAmortizado));
   return {
     id: row.id,
     nombre: row.nombre,
@@ -23,15 +60,19 @@ function serializeLoan(row) {
     fechaInicio: row.fecha_inicio,
     saldoPendiente: row.saldo_pendiente,
     cuotasPagadas: row.cuotas_pagadas,
+    penalidadPct: row.penalidad_pct,
     activo: !!row.activo,
     saldado: row.saldo_pendiente <= 0,
-    progresoPct: round2((row.cuotas_pagadas / row.plazo_meses) * 100),
-    proximaCuotaFecha: row.saldo_pendiente > 0 ? dateInMonth(nextKey, row.dia_pago) : null
+    progresoPct: round2(Math.min(100, ((row.original - row.saldo_pendiente) / row.original) * 100)),
+    proximaCuotaFecha: row.saldo_pendiente > 0 ? dateInMonth(nextKey, row.dia_pago) : null,
+    interesPagado,
+    totalDesembolsado: round2(pagos.total),
+    numPagos: pagos.n
   };
 }
 
 router.get('/', (req, res) => {
-  res.json(listStmt.all(req.user.id).map(serializeLoan));
+  res.json(listStmt.all(req.user.id).map((l) => serializeLoan(l, req.user.id)));
 });
 
 router.post('/', (req, res) => {
@@ -43,26 +84,83 @@ router.post('/', (req, res) => {
   const tasaAnual = Number(b.tasaAnual);
   const plazoMeses = Number(b.plazoMeses);
   const diaPago = Number(b.diaPago);
+  const penalidadPct = b.penalidadPct !== undefined && b.penalidadPct !== '' ? Number(b.penalidadPct) : 0;
   if (!Number.isFinite(original) || original <= 0) return res.status(400).json({ error: 'original debe ser mayor que 0' });
   if (!Number.isFinite(tasaAnual) || tasaAnual < 0) return res.status(400).json({ error: 'tasaAnual inválida' });
   if (!Number.isInteger(plazoMeses) || plazoMeses <= 0) return res.status(400).json({ error: 'plazoMeses debe ser entero positivo' });
   if (!Number.isInteger(diaPago) || diaPago < 1 || diaPago > 31) return res.status(400).json({ error: 'diaPago debe ser 1-31' });
+  if (!Number.isFinite(penalidadPct) || penalidadPct < 0 || penalidadPct > 100) return res.status(400).json({ error: 'penalidadPct inválida (0-100)' });
   const fechaInicio = b.fechaInicio || todayLocalISO();
   if (!isValidFechaSort(fechaInicio)) return res.status(400).json({ error: 'fechaInicio inválida (yyyy-mm-dd)' });
 
   const cuota = round2(frenchPayment(original, tasaAnual, plazoMeses));
   const info = db.prepare(`
     INSERT INTO loans (user_id, nombre, banco, original, tasa_anual, plazo_meses,
-                       cuota_mensual, dia_pago, fecha_inicio, saldo_pendiente)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       cuota_mensual, dia_pago, fecha_inicio, saldo_pendiente, penalidad_pct)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(req.user.id, nombre, b.banco ? String(b.banco) : null, original, tasaAnual,
-    plazoMeses, cuota, diaPago, fechaInicio, original);
+    plazoMeses, cuota, diaPago, fechaInicio, original, penalidadPct);
 
-  res.status(201).json(serializeLoan(findById.get(req.user.id, info.lastInsertRowid)));
+  res.status(201).json(serializeLoan(findById.get(req.user.id, info.lastInsertRowid), req.user.id));
 });
 
-// Pago de cuota: separa interés/capital sobre el saldo actual; el saldo
-// baja SOLO por el capital. La transacción sí es un gasto (neg=1).
+// Proyección de las cuotas RESTANTES desde el saldo actual. Para un
+// préstamo sin abonos extra equivale a la tabla francesa completa desde
+// la cuota actual; tras un abono extra refleja la realidad, no el plan
+// original. Las cuotas ya pagadas se consultan en GET /:id/pagos.
+router.get('/:id/schedule', (req, res) => {
+  const loan = findById.get(req.user.id, Number(req.params.id));
+  if (!loan) return res.status(404).json({ error: 'Préstamo no existe' });
+
+  const schedule = [];
+  let saldo = loan.saldo_pendiente;
+  let key = addMonthsToKey(monthKey(loan.fecha_inicio), loan.cuotas_pagadas);
+  let n = loan.cuotas_pagadas;
+  let totalInteres = 0;
+  while (saldo > 0.01 && schedule.length < 600) {
+    const { interes, capital } = splitCuota(saldo, loan.tasa_anual, loan.cuota_mensual);
+    if (capital <= 0) break; // cuota no cubre interés — no proyectable
+    saldo = round2(Math.max(0, saldo - capital));
+    key = addMonthsToKey(key, 1);
+    n++;
+    totalInteres += interes;
+    schedule.push({
+      n,
+      fecha: dateInMonth(key, loan.dia_pago),
+      cuota: round2(interes + capital),
+      interes,
+      capital,
+      saldo
+    });
+  }
+  res.json({
+    cuotasPagadas: loan.cuotas_pagadas,
+    saldoActual: loan.saldo_pendiente,
+    interesRestante: round2(totalInteres),
+    schedule
+  });
+});
+
+// Historial real de pagos (cuotas + abonos extra) desde transactions
+router.get('/:id/pagos', (req, res) => {
+  const loan = findById.get(req.user.id, Number(req.params.id));
+  if (!loan) return res.status(404).json({ error: 'Préstamo no existe' });
+
+  const pagos = db.prepare(`
+    SELECT id, nombre, monto_num, fecha_sort FROM transactions
+    WHERE user_id = ? AND loan_id = ? ORDER BY fecha_sort DESC, id DESC
+  `).all(req.user.id, loan.id).map((p) => ({
+    id: p.id,
+    nombre: p.nombre,
+    monto: p.monto_num,
+    fechaSort: p.fecha_sort,
+    esAbonoExtra: p.nombre.startsWith('Abono extra')
+  }));
+
+  res.json({ pagos, loan: serializeLoan(loan, req.user.id) });
+});
+
+// Pago de cuota regular: separa interés/capital sobre el saldo actual
 router.post('/:id/pay', (req, res) => {
   const loan = findById.get(req.user.id, Number(req.params.id));
   if (!loan) return res.status(404).json({ error: 'Préstamo no existe' });
@@ -91,7 +189,189 @@ router.post('/:id/pay', (req, res) => {
   res.status(201).json({
     ok: true,
     pago: { interes, capital, total: montoPagado },
-    loan: serializeLoan(findById.get(req.user.id, loan.id))
+    loan: serializeLoan(findById.get(req.user.id, loan.id), req.user.id)
+  });
+});
+
+// Calcula el efecto de un abono extra en ambos modos, sin escribir nada
+function simularExtra(loan, monto) {
+  const capitalAplicado = round2(Math.min(monto, loan.saldo_pendiente));
+  const penalidad = round2(capitalAplicado * loan.penalidad_pct / 100);
+  const nuevoSaldo = round2(loan.saldo_pendiente - capitalAplicado);
+
+  const mesesSinAbono = mesesRestantes(loan.saldo_pendiente, loan.tasa_anual, loan.cuota_mensual);
+  const interesSinAbono = interesRestante(loan.saldo_pendiente, loan.tasa_anual, loan.cuota_mensual);
+
+  // Modo 1: reducir plazo — misma cuota, el préstamo termina antes
+  const mesesReducirPlazo = nuevoSaldo > 0 ? mesesRestantes(nuevoSaldo, loan.tasa_anual, loan.cuota_mensual) : 0;
+  const interesReducirPlazo = nuevoSaldo > 0 ? interesRestante(nuevoSaldo, loan.tasa_anual, loan.cuota_mensual) : 0;
+
+  // Modo 2: reducir cuota — mismo plazo restante, cuota nueva más baja
+  const nuevaCuota = nuevoSaldo > 0 && Number.isFinite(mesesSinAbono) && mesesSinAbono > 0
+    ? round2(frenchPayment(nuevoSaldo, loan.tasa_anual, mesesSinAbono))
+    : 0;
+  const interesReducirCuota = nuevoSaldo > 0 && nuevaCuota > 0
+    ? interesRestante(nuevoSaldo, loan.tasa_anual, nuevaCuota)
+    : 0;
+
+  return {
+    capitalAplicado,
+    penalidad,
+    totalDesembolso: round2(capitalAplicado + penalidad),
+    nuevoSaldo,
+    liquidaPrestamo: nuevoSaldo <= 0,
+    sinAbono: { meses: mesesSinAbono, interes: interesSinAbono },
+    reducirPlazo: {
+      meses: mesesReducirPlazo,
+      interes: interesReducirPlazo,
+      cuota: loan.cuota_mensual,
+      ahorroInteres: Number.isFinite(interesSinAbono) ? round2(interesSinAbono - interesReducirPlazo - penalidad) : null,
+      mesesAhorrados: Number.isFinite(mesesSinAbono) ? mesesSinAbono - mesesReducirPlazo : null
+    },
+    reducirCuota: {
+      meses: nuevoSaldo > 0 ? mesesSinAbono : 0,
+      interes: interesReducirCuota,
+      cuota: nuevaCuota,
+      ahorroInteres: Number.isFinite(interesSinAbono) ? round2(interesSinAbono - interesReducirCuota - penalidad) : null,
+      ahorroCuotaMensual: nuevoSaldo > 0 ? round2(loan.cuota_mensual - nuevaCuota) : loan.cuota_mensual
+    }
+  };
+}
+
+router.post('/:id/simular-extra', (req, res) => {
+  const loan = findById.get(req.user.id, Number(req.params.id));
+  if (!loan) return res.status(404).json({ error: 'Préstamo no existe' });
+  if (loan.saldo_pendiente <= 0) return res.status(400).json({ error: 'El préstamo ya está saldado' });
+  const monto = Number((req.body || {}).monto);
+  if (!Number.isFinite(monto) || monto <= 0) return res.status(400).json({ error: 'monto debe ser mayor que 0' });
+  res.json(simularExtra(loan, monto));
+});
+
+// Abono extraordinario a capital: reduce el saldo directamente. La
+// penalidad es un cargo real (va en la transacción); el capital reduce
+// deuda. En modo reducir_cuota la cuota mensual se recalcula.
+router.post('/:id/pay-extra', (req, res) => {
+  const loan = findById.get(req.user.id, Number(req.params.id));
+  if (!loan) return res.status(404).json({ error: 'Préstamo no existe' });
+  if (loan.saldo_pendiente <= 0) return res.status(400).json({ error: 'El préstamo ya está saldado' });
+
+  const b = req.body || {};
+  const monto = Number(b.monto);
+  if (!Number.isFinite(monto) || monto <= 0) return res.status(400).json({ error: 'monto debe ser mayor que 0' });
+  const modo = b.modo;
+  if (modo !== 'reducir_plazo' && modo !== 'reducir_cuota') {
+    return res.status(400).json({ error: "modo debe ser 'reducir_plazo' o 'reducir_cuota'" });
+  }
+  const fechaSort = b.fechaSort || todayLocalISO();
+  if (!isValidFechaSort(fechaSort)) return res.status(400).json({ error: 'fechaSort inválido (yyyy-mm-dd)' });
+
+  const sim = simularExtra(loan, monto);
+
+  const apply = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO transactions (user_id, nombre, cat, metodo, monto_num, moneda, neg,
+                                is_pago_prestamo, fecha_sort, quincena, loan_id)
+      VALUES (?, ?, 'Préstamos', ?, ?, 'RD$', 1, 1, ?, ?, ?)
+    `).run(req.user.id, `Abono extra ${loan.nombre}`, loan.banco || 'Banco',
+      sim.totalDesembolso, fechaSort, quincenaOf(fechaSort), loan.id);
+
+    const nuevaCuota = modo === 'reducir_cuota' && !sim.liquidaPrestamo
+      ? sim.reducirCuota.cuota
+      : loan.cuota_mensual;
+    db.prepare('UPDATE loans SET saldo_pendiente = ?, cuota_mensual = ? WHERE id = ?')
+      .run(sim.nuevoSaldo, nuevaCuota, loan.id);
+  });
+  apply();
+
+  res.status(201).json({
+    ok: true,
+    modo,
+    aplicado: { capital: sim.capitalAplicado, penalidad: sim.penalidad, total: sim.totalDesembolso },
+    loan: serializeLoan(findById.get(req.user.id, loan.id), req.user.id)
+  });
+});
+
+// Estrategias de pago de deudas: compara baseline vs bola de nieve
+// (menor saldo primero) vs avalancha (mayor tasa primero) con un monto
+// extra mensual. Cuando un préstamo se liquida, su cuota se suma al
+// extra disponible (efecto bola de nieve). Simulación pura.
+// Nota: no incluye penalidades por prepago.
+router.get('/estrategia', (req, res) => {
+  const extra = Number(req.query.extra) || 0;
+  if (extra < 0) return res.status(400).json({ error: 'extra inválido' });
+
+  const loans = listStmt.all(req.user.id)
+    .filter((l) => l.activo && l.saldo_pendiente > 0)
+    .map((l) => ({ id: l.id, nombre: l.nombre, saldo: l.saldo_pendiente, tasa: l.tasa_anual, cuota: l.cuota_mensual }));
+  if (loans.length === 0) return res.json({ prestamos: 0 });
+
+  function simular(orden) {
+    // orden: función que elige el préstamo objetivo del extra cada mes
+    const ls = loans.map((l) => ({ ...l }));
+    let meses = 0;
+    let interesTotal = 0;
+    let extraDisponible = extra;
+    while (ls.some((l) => l.saldo > RESIDUO_SALDO) && meses < 600) {
+      meses++;
+      // cuotas regulares
+      for (const l of ls) {
+        if (l.saldo <= RESIDUO_SALDO) continue;
+        const int = l.saldo * (l.tasa / 100 / 12);
+        interesTotal += int;
+        const cap = Math.min(Math.max(0, l.cuota - int), l.saldo);
+        l.saldo = Math.max(0, l.saldo - cap);
+        if (l.saldo <= RESIDUO_SALDO && !l.liquidado) {
+          l.liquidado = true;
+          extraDisponible += l.cuota; // su cuota rueda al extra
+        }
+      }
+      // extra al objetivo
+      if (extraDisponible > 0) {
+        const vivos = ls.filter((l) => l.saldo > RESIDUO_SALDO);
+        if (vivos.length) {
+          const target = orden(vivos);
+          target.saldo = Math.max(0, target.saldo - extraDisponible);
+          if (target.saldo <= RESIDUO_SALDO && !target.liquidado) {
+            target.liquidado = true;
+            extraDisponible += target.cuota;
+          }
+        }
+      }
+    }
+    return { meses: meses >= 600 ? Infinity : meses, interesTotal: round2(interesTotal) };
+  }
+
+  const baseline = simularSinExtra(loans);
+  const nieve = simular((vivos) => vivos.reduce((a, b2) => (a.saldo < b2.saldo ? a : b2)));
+  const avalancha = simular((vivos) => vivos.reduce((a, b2) => (a.tasa > b2.tasa ? a : b2)));
+
+  function simularSinExtra(base) {
+    const ls = base.map((l) => ({ ...l }));
+    let meses = 0;
+    let interesTotal = 0;
+    while (ls.some((l) => l.saldo > RESIDUO_SALDO) && meses < 600) {
+      meses++;
+      for (const l of ls) {
+        if (l.saldo <= RESIDUO_SALDO) continue;
+        const int = l.saldo * (l.tasa / 100 / 12);
+        if (l.cuota <= int + 0.01) return { meses: Infinity, interesTotal: Infinity };
+        interesTotal += int;
+        l.saldo = Math.max(0, l.saldo - (l.cuota - int));
+      }
+    }
+    return { meses: meses >= 600 ? Infinity : meses, interesTotal: round2(interesTotal) };
+  }
+
+  const ordenNieve = [...loans].sort((a, b2) => a.saldo - b2.saldo).map((l) => l.nombre);
+  const ordenAvalancha = [...loans].sort((a, b2) => b2.tasa - a.tasa).map((l) => l.nombre);
+
+  res.json({
+    prestamos: loans.length,
+    extraMensual: extra,
+    baseline,
+    nieve: { ...nieve, orden: ordenNieve },
+    avalancha: { ...avalancha, orden: ordenAvalancha },
+    nota: 'La simulación no incluye penalidades por prepago.'
   });
 });
 
@@ -108,11 +388,16 @@ router.put('/:id', (req, res) => {
     diaPago = Number(b.diaPago);
     if (!Number.isInteger(diaPago) || diaPago < 1 || diaPago > 31) return res.status(400).json({ error: 'diaPago debe ser 1-31' });
   }
+  let penalidadPct = loan.penalidad_pct;
+  if (b.penalidadPct !== undefined) {
+    penalidadPct = Number(b.penalidadPct);
+    if (!Number.isFinite(penalidadPct) || penalidadPct < 0 || penalidadPct > 100) return res.status(400).json({ error: 'penalidadPct inválida (0-100)' });
+  }
   const activo = b.activo !== undefined ? (b.activo ? 1 : 0) : loan.activo;
 
-  db.prepare('UPDATE loans SET nombre = ?, banco = ?, dia_pago = ?, activo = ? WHERE user_id = ? AND id = ?')
-    .run(nombre, banco, diaPago, activo, req.user.id, loan.id);
-  res.json(serializeLoan(findById.get(req.user.id, loan.id)));
+  db.prepare('UPDATE loans SET nombre = ?, banco = ?, dia_pago = ?, penalidad_pct = ?, activo = ? WHERE user_id = ? AND id = ?')
+    .run(nombre, banco, diaPago, penalidadPct, activo, req.user.id, loan.id);
+  res.json(serializeLoan(findById.get(req.user.id, loan.id), req.user.id));
 });
 
 router.delete('/:id', (req, res) => {
