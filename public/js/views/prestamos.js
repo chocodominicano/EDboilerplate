@@ -4,11 +4,16 @@ import { fmtRD, fmtFechaDDMM, todayISO, addMonthsISO } from '../format.js';
 import { attachMoney, moneyToNum } from '../money.js';
 
 export async function render(el) {
-  const loans = await apiGet('/api/loans');
+  const [loans, cards] = await Promise.all([apiGet('/api/loans'), apiGet('/api/cards')]);
   const activos = loans.filter((l) => !l.saldado && l.activo);
+  const cardsConDeuda = cards.filter((c) => c.activo && (c.usedRD > 0 || c.usedUSD > 0));
   const totalSaldo = activos.reduce((a, l) => a + l.saldoPendiente, 0);
   const totalCuotas = activos.reduce((a, l) => a + l.cuotaMensual, 0);
   const totalInteresPagado = loans.reduce((a, l) => a + l.interesPagado, 0);
+  const proximaLoan = activos.reduce((min, l) => (
+    l.proximaCuotaFecha && (!min || l.proximaCuotaFecha < min.proximaCuotaFecha) ? l : min
+  ), null);
+  const mostrarEstrategia = (activos.length + cardsConDeuda.length) >= 2;
 
   el.innerHTML = `
     <div class="section-head">
@@ -21,7 +26,10 @@ export async function render(el) {
       <div class="kpi"><div class="kpi-label">Saldo pendiente total</div><div class="kpi-value neg">${fmtRD(totalSaldo)}</div></div>
       <div class="kpi"><div class="kpi-label">Cuotas mensuales</div><div class="kpi-value">${fmtRD(totalCuotas)}</div></div>
       <div class="kpi"><div class="kpi-label">Intereses/cargos pagados</div><div class="kpi-value" style="color:var(--amber)">${fmtRD(totalInteresPagado)}</div><div class="kpi-sub">histórico, todos los préstamos</div></div>
-      <div class="kpi"><div class="kpi-label">Activos</div><div class="kpi-value">${activos.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Próxima cuota</div>
+        <div class="kpi-value">${proximaLoan ? fmtFechaDDMM(proximaLoan.proximaCuotaFecha) : '—'}</div>
+        <div class="kpi-sub">${proximaLoan ? `${esc(proximaLoan.nombre)} · ${fmtRD(proximaLoan.cuotaMensual)}` : 'sin cuotas pendientes'}</div>
+      </div>
     </div>` : ''}
 
     <div class="card">
@@ -45,7 +53,8 @@ export async function render(el) {
               <td class="muted">${l.proximaCuotaFecha ? fmtFechaDDMM(l.proximaCuotaFecha) : '—'}</td>
               <td style="white-space:nowrap">
                 ${!l.saldado ? `<button class="btn btn-sm btn-success" data-pay="${l.id}">Pagar cuota</button>
-                <button class="btn btn-sm" data-extra="${l.id}" title="Abono extra a capital">⚡ Abono</button>` : ''}
+                <button class="btn btn-sm" data-extra="${l.id}" title="Abono extra a capital">⚡ Abono</button>
+                <button class="btn btn-sm" data-simular="${l.id}" title="Simular extra mensual o cuota doble">📈 Simular</button>` : ''}
                 <button class="btn btn-sm" data-detalle="${l.id}" title="Amortización y pagos">📋</button>
                 <button class="btn btn-sm btn-ghost" data-del="${l.id}" title="Eliminar">🗑</button>
               </td>
@@ -54,7 +63,7 @@ export async function render(el) {
       </table></div>`}
     </div>
 
-    ${activos.length >= 2 ? estrategiaCardHTML() : ''}
+    ${mostrarEstrategia ? estrategiaCardHTML() : ''}
   `;
 
   el.querySelector('#add-loan').onclick = () => openLoanForm(el);
@@ -83,6 +92,11 @@ export async function render(el) {
     b.onclick = () => openExtraModal(el, loan);
   });
 
+  el.querySelectorAll('[data-simular]').forEach((b) => {
+    const loan = loans.find((l) => l.id === Number(b.dataset.simular));
+    b.onclick = () => openSimuladorModal(loan);
+  });
+
   el.querySelectorAll('[data-detalle]').forEach((b) => {
     const loan = loans.find((l) => l.id === Number(b.dataset.detalle));
     b.onclick = () => openDetalleModal(loan);
@@ -101,7 +115,7 @@ export async function render(el) {
     };
   });
 
-  if (activos.length >= 2) bindEstrategia(el);
+  if (mostrarEstrategia) bindEstrategia(el);
 }
 
 // ─── Alta con 3 modos de fecha y simulador previo ───────────
@@ -373,13 +387,90 @@ function openExtraModal(viewEl, loan) {
   };
 }
 
-// ─── Estrategia de deudas (≥2 préstamos activos) ────────────
+// ─── Simulador de escenarios recurrentes (proyección pura, no aplica nada) ─
+
+function openSimuladorModal(loan) {
+  const m = openModal(`
+    <h2>📈 Simular escenarios — ${esc(loan.nombre)}</h2>
+    <p class="muted small">Saldo actual: ${fmtRD(loan.saldoPendiente)} · cuota: ${fmtRD(loan.cuotaMensual)}</p>
+    <form id="sim-rec-form" class="form-grid">
+      <label>Escenario
+        <select name="modo">
+          <option value="mensual">Extra fijo cada mes</option>
+          <option value="doble">Cuota doble cada N meses</option>
+        </select>
+      </label>
+      <label id="campo-mensual">Extra mensual RD$<input type="text" name="montoExtra" inputmode="decimal" placeholder="0.00"></label>
+      <label id="campo-doble" style="display:none">Cada cuántos meses (N)<input type="number" name="frecuenciaMeses" min="1" placeholder="6"></label>
+    </form>
+    <div id="sim-rec-result" class="small" style="margin-top:0.75rem"><span class="muted">Ingresa un valor para ver la proyección.</span></div>
+    <p class="muted small" style="margin-top:0.5rem">Esta es una proyección — no aplica nada. Para pagar de más usa ⚡ Abono o Pagar cuota cada mes.</p>
+    <div class="modal-actions"><button class="btn" data-act="close">Cerrar</button></div>
+  `);
+  m.el.style.maxWidth = '560px';
+
+  const form = m.el.querySelector('#sim-rec-form');
+  const campoMensual = m.el.querySelector('#campo-mensual');
+  const campoDoble = m.el.querySelector('#campo-doble');
+  const resultEl = m.el.querySelector('#sim-rec-result');
+  attachMoney(form.montoExtra);
+
+  form.modo.addEventListener('change', () => {
+    const esMensual = form.modo.value === 'mensual';
+    campoMensual.style.display = esMensual ? '' : 'none';
+    campoDoble.style.display = esMensual ? 'none' : '';
+    resultEl.innerHTML = '<span class="muted">Ingresa un valor para ver la proyección.</span>';
+  });
+
+  let simTimer = null;
+  async function runSim() {
+    const modo = form.modo.value;
+    const payload = { modo };
+    if (modo === 'mensual') {
+      const v = moneyToNum(form.montoExtra);
+      if (v <= 0) { resultEl.innerHTML = '<span class="muted">Ingresa un valor para ver la proyección.</span>'; return; }
+      payload.montoExtra = v;
+    } else {
+      const v = Number(form.frecuenciaMeses.value);
+      if (!v || v < 1) { resultEl.innerHTML = '<span class="muted">Ingresa un valor para ver la proyección.</span>'; return; }
+      payload.frecuenciaMeses = v;
+    }
+    try {
+      const s = await apiPost(`/api/loans/${loan.id}/simular-recurrente`, payload);
+      const fm = (mn) => (Number.isFinite(mn) ? `${mn} meses` : '∞');
+      const fi = (v) => (Number.isFinite(v) ? fmtRD(v) : '∞');
+      resultEl.innerHTML = `
+        <div style="overflow-x:auto"><table style="width:100%">
+          <thead><tr><th></th><th>Cuota normal</th><th>Con este escenario</th></tr></thead>
+          <tbody>
+            <tr><td class="muted">Meses restantes</td><td>${fm(s.baseline.meses)}</td><td>${fm(s.conExtra.meses)}</td></tr>
+            <tr><td class="muted">Interés restante</td><td>${fi(s.baseline.interes)}</td><td>${fi(s.conExtra.interes)}</td></tr>
+          </tbody>
+        </table></div>
+        <div style="margin-top:0.5rem">
+          Ahorro de interés: <strong class="pos">${s.ahorroInteres !== null ? fmtRD(s.ahorroInteres) : '—'}</strong> ·
+          Terminas <strong class="pos">${s.mesesAhorrados !== null ? `${s.mesesAhorrados} meses antes` : '—'}</strong>
+        </div>`;
+    } catch (err) {
+      resultEl.innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+    }
+  }
+  form.addEventListener('input', () => {
+    clearTimeout(simTimer);
+    simTimer = setTimeout(runSim, 350);
+  });
+
+  m.el.querySelector('[data-act="close"]').onclick = m.close;
+}
+
+// ─── Estrategia de deudas unificada: préstamos + tarjetas (≥2 deudas) ─
 
 function estrategiaCardHTML() {
   return `
     <div class="card" id="estrategia-card">
       <h2>🏔️ Estrategia de pago de deudas</h2>
-      <p class="muted small">Compara cuánto ahorras destinando un monto extra mensual a tus préstamos.
+      <p class="muted small">Compara cuánto ahorras destinando un monto extra mensual a TODAS tus deudas
+        (préstamos y tarjetas de crédito juntos).
         <strong>Bola de nieve</strong>: ataca el menor saldo primero (victorias rápidas, motivacional).
         <strong>Avalancha</strong>: ataca la mayor tasa primero (matemáticamente óptima).</p>
       <div class="form-grid">
@@ -409,6 +500,7 @@ function bindEstrategia(el) {
       const ahorroAva = Number.isFinite(r.baseline.interesTotal) && Number.isFinite(r.avalancha.interesTotal)
         ? r.baseline.interesTotal - r.avalancha.interesTotal : null;
       out.innerHTML = `
+        <p class="muted small" style="margin-bottom:0.4rem">${r.prestamos} préstamo(s) + ${r.tarjetas} tarjeta(s) con deuda = ${r.deudas} deuda(s) analizadas.</p>
         <div class="table-wrap"><table>
           <thead><tr><th></th><th>Sin extra</th><th>❄️ Bola de nieve</th><th>⛰️ Avalancha</th></tr></thead>
           <tbody>
@@ -422,7 +514,7 @@ function bindEstrategia(el) {
               <td class="small">${r.avalancha.orden.map(esc).join(' → ')}</td></tr>
           </tbody>
         </table></div>
-        <p class="muted small" style="margin-top:0.4rem">${esc(r.nota)} Cuando un préstamo se liquida, su cuota se suma al extra del siguiente (efecto bola de nieve).</p>`;
+        <p class="muted small" style="margin-top:0.4rem">${esc(r.nota)} Cuando una deuda se liquida, su pago mínimo se suma al extra de la siguiente (efecto bola de nieve).</p>`;
     } catch (err) {
       out.innerHTML = `<span class="neg small">${esc(err.message)}</span>`;
     }

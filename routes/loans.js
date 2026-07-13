@@ -2,6 +2,12 @@ const express = require('express');
 const db = require('../db/database');
 const { isValidFechaSort, todayLocalISO, quincenaOf, addMonthsToKey, dateInMonth, monthKey } = require('../lib/dates');
 const { frenchPayment, splitCuota, round2, RESIDUO_SALDO } = require('../lib/amortization');
+const { getExchangeRate } = require('../lib/settings');
+
+// Piso del pago mínimo de tarjeta usado en la estrategia de deudas —
+// mismo valor que PAGO_MINIMO_PISO_RD en public/js/views/tarjetas.js
+// (proyección de salud crediticia), para que ambas simulaciones coincidan.
+const PAGO_MINIMO_PISO_RD = 500;
 
 const router = express.Router();
 
@@ -291,38 +297,63 @@ router.post('/:id/pay-extra', (req, res) => {
   });
 });
 
+// Pago mensual de una deuda: fijo para préstamos (cuota francesa), pero
+// recalculado sobre el saldo VIGENTE para tarjetas (el mínimo baja junto
+// con el saldo, igual que en la proyección de salud crediticia).
+function pagoMinimoDe(d) {
+  return d.tipo === 'tarjeta'
+    ? Math.max(d.saldo * d.pagoMinimoPct / 100, PAGO_MINIMO_PISO_RD)
+    : d.cuota;
+}
+
 // Estrategias de pago de deudas: compara baseline vs bola de nieve
 // (menor saldo primero) vs avalancha (mayor tasa primero) con un monto
-// extra mensual. Cuando un préstamo se liquida, su cuota se suma al
-// extra disponible (efecto bola de nieve). Simulación pura.
-// Nota: no incluye penalidades por prepago.
+// extra mensual. Unifica préstamos Y tarjetas de crédito — ambos son
+// deuda con interés y deben atacarse juntos, no por separado (si solo
+// se mostraran préstamos el plan estaría incompleto). Cuando una deuda
+// se liquida, su pago mínimo se suma al extra disponible (bola de nieve).
+// Simulación pura — no incluye penalidades por prepago.
 router.get('/estrategia', (req, res) => {
   const extra = Number(req.query.extra) || 0;
   if (extra < 0) return res.status(400).json({ error: 'extra inválido' });
 
-  const loans = listStmt.all(req.user.id)
+  const deudasLoans = listStmt.all(req.user.id)
     .filter((l) => l.activo && l.saldo_pendiente > 0)
-    .map((l) => ({ id: l.id, nombre: l.nombre, saldo: l.saldo_pendiente, tasa: l.tasa_anual, cuota: l.cuota_mensual }));
-  if (loans.length === 0) return res.json({ prestamos: 0 });
+    .map((l) => ({ nombre: l.nombre, saldo: l.saldo_pendiente, tasa: l.tasa_anual, tipo: 'prestamo', cuota: l.cuota_mensual }));
+
+  const rate = getExchangeRate(req.user.id).rate;
+  const deudasCards = db.prepare('SELECT * FROM credit_cards WHERE user_id = ?').all(req.user.id)
+    .map((c) => ({
+      nombre: c.label,
+      saldo: round2(Math.max(0, c.used_rd) + Math.max(0, c.used_usd) * rate),
+      tasa: c.tasa_interes,
+      tipo: 'tarjeta',
+      pagoMinimoPct: c.pago_minimo_pct
+    }))
+    .filter((c) => c.saldo > 0);
+
+  const deudas = [...deudasLoans, ...deudasCards];
+  if (deudas.length === 0) return res.json({ deudas: 0 });
 
   function simular(orden) {
-    // orden: función que elige el préstamo objetivo del extra cada mes
-    const ls = loans.map((l) => ({ ...l }));
+    // orden: función que elige la deuda objetivo del extra cada mes
+    const ls = deudas.map((d) => ({ ...d }));
     let meses = 0;
     let interesTotal = 0;
     let extraDisponible = extra;
     while (ls.some((l) => l.saldo > RESIDUO_SALDO) && meses < 600) {
       meses++;
-      // cuotas regulares
+      // pagos regulares (cuota fija o mínimo de tarjeta recalculado)
       for (const l of ls) {
         if (l.saldo <= RESIDUO_SALDO) continue;
         const int = l.saldo * (l.tasa / 100 / 12);
         interesTotal += int;
-        const cap = Math.min(Math.max(0, l.cuota - int), l.saldo);
+        const pagoMin = pagoMinimoDe(l);
+        const cap = Math.min(Math.max(0, pagoMin - int), l.saldo);
         l.saldo = Math.max(0, l.saldo - cap);
         if (l.saldo <= RESIDUO_SALDO && !l.liquidado) {
           l.liquidado = true;
-          extraDisponible += l.cuota; // su cuota rueda al extra
+          extraDisponible += pagoMin; // su pago mínimo rueda al extra
         }
       }
       // extra al objetivo
@@ -330,10 +361,11 @@ router.get('/estrategia', (req, res) => {
         const vivos = ls.filter((l) => l.saldo > RESIDUO_SALDO);
         if (vivos.length) {
           const target = orden(vivos);
+          const pagoMinTarget = pagoMinimoDe(target);
           target.saldo = Math.max(0, target.saldo - extraDisponible);
           if (target.saldo <= RESIDUO_SALDO && !target.liquidado) {
             target.liquidado = true;
-            extraDisponible += target.cuota;
+            extraDisponible += pagoMinTarget;
           }
         }
       }
@@ -341,12 +373,8 @@ router.get('/estrategia', (req, res) => {
     return { meses: meses >= 600 ? Infinity : meses, interesTotal: round2(interesTotal) };
   }
 
-  const baseline = simularSinExtra(loans);
-  const nieve = simular((vivos) => vivos.reduce((a, b2) => (a.saldo < b2.saldo ? a : b2)));
-  const avalancha = simular((vivos) => vivos.reduce((a, b2) => (a.tasa > b2.tasa ? a : b2)));
-
   function simularSinExtra(base) {
-    const ls = base.map((l) => ({ ...l }));
+    const ls = base.map((d) => ({ ...d }));
     let meses = 0;
     let interesTotal = 0;
     while (ls.some((l) => l.saldo > RESIDUO_SALDO) && meses < 600) {
@@ -354,24 +382,94 @@ router.get('/estrategia', (req, res) => {
       for (const l of ls) {
         if (l.saldo <= RESIDUO_SALDO) continue;
         const int = l.saldo * (l.tasa / 100 / 12);
-        if (l.cuota <= int + 0.01) return { meses: Infinity, interesTotal: Infinity };
+        const pagoMin = pagoMinimoDe(l);
+        if (pagoMin <= int + 0.01) return { meses: Infinity, interesTotal: Infinity };
         interesTotal += int;
-        l.saldo = Math.max(0, l.saldo - (l.cuota - int));
+        l.saldo = Math.max(0, l.saldo - (pagoMin - int));
       }
     }
     return { meses: meses >= 600 ? Infinity : meses, interesTotal: round2(interesTotal) };
   }
 
-  const ordenNieve = [...loans].sort((a, b2) => a.saldo - b2.saldo).map((l) => l.nombre);
-  const ordenAvalancha = [...loans].sort((a, b2) => b2.tasa - a.tasa).map((l) => l.nombre);
+  const baseline = simularSinExtra(deudas);
+  const nieve = simular((vivos) => vivos.reduce((a, b2) => (a.saldo < b2.saldo ? a : b2)));
+  const avalancha = simular((vivos) => vivos.reduce((a, b2) => (a.tasa > b2.tasa ? a : b2)));
+
+  const ordenNieve = [...deudas].sort((a, b2) => a.saldo - b2.saldo).map((d) => d.nombre);
+  const ordenAvalancha = [...deudas].sort((a, b2) => b2.tasa - a.tasa).map((d) => d.nombre);
 
   res.json({
-    prestamos: loans.length,
+    deudas: deudas.length,
+    prestamos: deudasLoans.length,
+    tarjetas: deudasCards.length,
     extraMensual: extra,
     baseline,
     nieve: { ...nieve, orden: ordenNieve },
     avalancha: { ...avalancha, orden: ordenAvalancha },
     nota: 'La simulación no incluye penalidades por prepago.'
+  });
+});
+
+// Simulación recurrente (pura, no escribe nada): compara la cuota normal
+// contra pagar un extra fijo cada mes, o una cuota doble cada N meses.
+// A diferencia de POST /:id/pay-extra, esto NO se puede "aplicar" en un
+// solo clic — es un compromiso recurrente que el usuario ejecuta él mismo
+// mes a mes (vía /pay o /pay-extra); esta ruta solo proyecta el resultado.
+function simularRecurrente(loan, modo, params) {
+  const i = loan.tasa_anual / 100 / 12;
+  let saldo = loan.saldo_pendiente;
+  let meses = 0;
+  let interes = 0;
+  while (saldo > RESIDUO_SALDO && meses < 600) {
+    const int = saldo * i;
+    let pago = loan.cuota_mensual;
+    if (modo === 'mensual') pago += params.montoExtra;
+    else if (meses % params.frecuencia === 0) pago += loan.cuota_mensual; // cuota doble
+    if (pago <= int + 0.01) return { meses: Infinity, interes: Infinity };
+    interes += int;
+    saldo -= (pago - int);
+    meses++;
+  }
+  return { meses, interes: round2(interes) };
+}
+
+router.post('/:id/simular-recurrente', (req, res) => {
+  const loan = findById.get(req.user.id, Number(req.params.id));
+  if (!loan) return res.status(404).json({ error: 'Préstamo no existe' });
+  if (loan.saldo_pendiente <= 0) return res.status(400).json({ error: 'El préstamo ya está saldado' });
+
+  const b = req.body || {};
+  const modo = b.modo;
+  if (modo !== 'mensual' && modo !== 'doble') {
+    return res.status(400).json({ error: "modo debe ser 'mensual' o 'doble'" });
+  }
+
+  const params = {};
+  if (modo === 'mensual') {
+    params.montoExtra = Number(b.montoExtra);
+    if (!Number.isFinite(params.montoExtra) || params.montoExtra <= 0) {
+      return res.status(400).json({ error: 'montoExtra debe ser mayor que 0' });
+    }
+  } else {
+    params.frecuencia = Number(b.frecuenciaMeses);
+    if (!Number.isInteger(params.frecuencia) || params.frecuencia < 1) {
+      return res.status(400).json({ error: 'frecuenciaMeses debe ser entero >= 1' });
+    }
+  }
+
+  const baseline = {
+    meses: mesesRestantes(loan.saldo_pendiente, loan.tasa_anual, loan.cuota_mensual),
+    interes: interesRestante(loan.saldo_pendiente, loan.tasa_anual, loan.cuota_mensual)
+  };
+  const conExtra = simularRecurrente(loan, modo, params);
+
+  res.json({
+    baseline,
+    conExtra,
+    ahorroInteres: Number.isFinite(baseline.interes) && Number.isFinite(conExtra.interes)
+      ? round2(baseline.interes - conExtra.interes) : null,
+    mesesAhorrados: Number.isFinite(baseline.meses) && Number.isFinite(conExtra.meses)
+      ? baseline.meses - conExtra.meses : null
   });
 });
 

@@ -171,7 +171,7 @@ await p.waitForTimeout(500);
 const rows3 = await p.locator('#view tbody tr').allTextContents();
 const rowSald = rows3.find((t) => t.includes('Personal'));
 ck('liquidación: badge saldado + saldo 0.00', rowSald.includes('saldado') && rowSald.includes('RD$0.00'), (rowSald || '').slice(0, 110));
-ck('liquidación: KPI activos = 1', (await p.locator('.kpi', { hasText: 'Activos' }).textContent()).includes('1'));
+ck('liquidación: 1 préstamo activo (1 botón Pagar cuota)', await p.locator('[data-pay]').count() === 1);
 ck('liquidación: estrategia desaparece (<2 activos)', await p.locator('#estrategia-card').count() === 0);
 ck('liquidación: sin botón pagar en saldado', !rowSald.includes('Pagar cuota'));
 await p.screenshot({ path: `${SHOT}/prest_5_final.png`, fullPage: true });
