@@ -55,7 +55,50 @@ function generarUsername(nombre, apellido) {
   return candidato;
 }
 
+// ─── Límite de intentos de login (anti fuerza bruta) ───────────
+// En memoria, por IP: MAX_INTENTOS fallos dentro de la ventana bloquean
+// esa IP por BLOQUEO_MS. Un login correcto limpia el contador. Se purgan
+// entradas viejas para que el mapa no crezca sin límite.
+const MAX_INTENTOS = 5;
+const VENTANA_MS = 15 * 60 * 1000;
+const BLOQUEO_MS = 15 * 60 * 1000;
+const intentos = new Map(); // ip → { count, first, blockedUntil }
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  if (intentos.size > 5000) {
+    for (const [k, v] of intentos) {
+      if (now - v.first > VENTANA_MS && (!v.blockedUntil || v.blockedUntil < now)) intentos.delete(k);
+    }
+  }
+  const e = intentos.get(ip);
+  if (!e) return null;
+  if (e.blockedUntil && e.blockedUntil > now) {
+    return Math.ceil((e.blockedUntil - now) / 60000);
+  }
+  if (now - e.first > VENTANA_MS) intentos.delete(ip);
+  return null;
+}
+
+function registrarFallo(ip, req) {
+  const now = Date.now();
+  const e = intentos.get(ip) || { count: 0, first: now, blockedUntil: 0 };
+  if (now - e.first > VENTANA_MS) { e.count = 0; e.first = now; }
+  e.count++;
+  if (e.count >= MAX_INTENTOS) {
+    e.blockedUntil = now + BLOQUEO_MS;
+    logEvent(null, 'Login bloqueado', `IP ${ip} superó ${MAX_INTENTOS} intentos fallidos`, req);
+  }
+  intentos.set(ip, e);
+}
+
 router.post('/login', (req, res) => {
+  const ip = req.ip || 'desconocida';
+  const bloqueadoMin = checkRateLimit(ip);
+  if (bloqueadoMin !== null) {
+    return res.status(429).json({ error: `Demasiados intentos fallidos. Intenta de nuevo en ${bloqueadoMin} minuto(s).` });
+  }
+
   const b = req.body || {};
   const password = String(b.password || '');
 
@@ -69,13 +112,18 @@ router.post('/login', (req, res) => {
     user = findByLogin.get(login, login);
   }
 
-  if (!user) return res.status(401).json({ error: 'Usuario no encontrado' });
+  if (!user) {
+    registrarFallo(ip, req);
+    return res.status(401).json({ error: 'Usuario no encontrado' });
+  }
   if (user.status === 'pending') return res.status(401).json({ error: 'Cuenta pendiente de aprobación' });
   if (user.status !== 'active') return res.status(401).json({ error: 'Cuenta inactiva' });
   if (!bcrypt.compareSync(password, user.password_hash)) {
+    registrarFallo(ip, req);
     return res.status(401).json({ error: 'Contraseña incorrecta' });
   }
 
+  intentos.delete(ip);
   logEvent(user.username, 'Login', `Inicio de sesión de ${user.name}`, req);
   res.json({ ok: true, token: issueToken(user), user: publicUser(user) });
 });

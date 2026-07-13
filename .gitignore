@@ -1,6 +1,7 @@
 node_modules/
 .idea/
 .env
+.jwt-secret
 *.db
 *.db-shm
 *.db-wal

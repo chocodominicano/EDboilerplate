@@ -1,8 +1,11 @@
 const bcrypt = require('bcryptjs');
 
+// Solo el usuario de bootstrap: sin él sería imposible entrar la primera
+// vez. Cambia su contraseña desde Administración → Usuarios → Contraseña.
+// (El antiguo usuario demo/1234 ya no se siembra; si existe en una DB
+// vieja, el admin puede eliminarlo desde el panel.)
 const DEFAULT_USERS = [
-  { username: 'Admin', password: 'Admin', name: 'Administrador', email: null, initials: 'AD', role: 'admin' },
-  { username: 'demo', password: '1234', name: 'Usuario Demo', email: 'demo@financiero.app', initials: 'UD', role: 'user' }
+  { username: 'Admin', password: 'Admin', name: 'Administrador', email: null, initials: 'AD', role: 'admin' }
 ];
 
 const DEFAULT_CATEGORIES = ['Comida', 'Transporte', 'Servicios', 'Salud', 'Entretenimiento',
