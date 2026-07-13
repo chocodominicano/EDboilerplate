@@ -2,6 +2,7 @@ node_modules/
 .idea/
 .env
 .jwt-secret
+tests/.tmp/
 *.db
 *.db-shm
 *.db-wal

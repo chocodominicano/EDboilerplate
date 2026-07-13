@@ -42,17 +42,34 @@ sin conexión a bancos.
 
 ```bash
 npm install
-cp .env.example .env   # opcional: define JWT_SECRET y PORT
 node server.js
 # Abre http://localhost:3000
 ```
 
-Usuarios por defecto:
+Usuario de arranque: **`Admin` / `Admin`** (rol admin). Cámbiale la contraseña en
+Administración → Usuarios → Contraseña la primera vez que entres. Los demás usuarios
+se crean desde el registro público (quedan pendientes de aprobación) o desde el panel.
 
-| Usuario | Contraseña | Rol |
+## Variables de entorno (opcionales)
+
+Se leen de `.env` en la raíz o del entorno del proceso:
+
+| Variable | Default | Descripción |
 |---|---|---|
-| `Admin` | `Admin` | admin |
-| `demo` | `1234` | user |
+| `PORT` | `3000` | Puerto del servidor |
+| `DB_PATH` | `./financiero.db` | Ruta del archivo SQLite |
+| `JWT_SECRET` | *(auto)* | Secreto para firmar tokens. Si no se define, se genera uno aleatorio la primera vez y se guarda en `.jwt-secret` (gitignored) |
+| `JWT_SECRET_PATH` | `./.jwt-secret` | Dónde persistir el secreto autogenerado |
+
+## Tests
+
+Suites E2E (Playwright) en `tests/` — usan una DB temporal, nunca tocan tu `financiero.db`:
+
+```bash
+npm i -D playwright && npx playwright install chromium   # una sola vez
+npm test                  # todas las suites
+npm test e2e.gastos       # solo las que coincidan con el filtro
+```
 
 ## Estructura
 
@@ -62,6 +79,7 @@ db/                Esquema SQLite, conexión y seeds
 lib/               Dominio: fechas RD, amortización, ciclos de corte, tasa BCRD
 routes/            Endpoints REST (/api/...)
 public/            Frontend SPA (index.html + css/ + js/)
+tests/             Suites E2E Playwright + runner (npm test)
 financiero.db      Datos (gitignored — se crea al iniciar)
 ```
 
