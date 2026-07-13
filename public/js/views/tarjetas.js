@@ -116,7 +116,9 @@ async function renderConsumos(body, viewEl, cards) {
 }
 
 function consolidadoHTML(cards) {
-  const rate = state.exchangeRate?.rate || 60;
+  // state.exchangeRate siempre existe (default del cliente en state.js,
+  // reemplazado por el valor del servidor al entrar a la app)
+  const rate = state.exchangeRate.rate;
   const selKeys = cards.filter((c) => consolidadoSel.get(c.key) !== false);
   const totalRD = selKeys.reduce((a, c) => a + c.usedRD, 0);
   const totalUSD = selKeys.reduce((a, c) => a + c.usedUSD, 0);

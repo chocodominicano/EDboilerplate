@@ -1,6 +1,6 @@
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, openModal, progressBar } from '../ui.js';
-import { fmtRD, fmtFechaDDMM, todayISO, pad2 } from '../format.js';
+import { fmtRD, fmtFechaDDMM, todayISO, addMonthsISO } from '../format.js';
 import { attachMoney, moneyToNum } from '../money.js';
 
 export async function render(el) {
@@ -105,19 +105,6 @@ export async function render(el) {
 }
 
 // ─── Alta con 3 modos de fecha y simulador previo ───────────
-
-// Deriva fechaInicio según el modo elegido (aritmética por string,
-// reutilizando la misma lógica de meses cortos del backend)
-function addMonthsISO(iso, n) {
-  const y = Number(iso.slice(0, 4));
-  const m = Number(iso.slice(5, 7));
-  const d = Number(iso.slice(8, 10));
-  const total = y * 12 + (m - 1) + n;
-  const ny = Math.floor(total / 12);
-  const nm = (total % 12) + 1;
-  const dim = new Date(ny, nm, 0).getDate();
-  return `${ny}-${pad2(nm)}-${pad2(Math.min(d, dim))}`;
-}
 
 function frenchPaymentLocal(P, tasaAnual, n) {
   const i = tasaAnual / 100 / 12;

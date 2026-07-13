@@ -2,9 +2,9 @@ import { apiGet, apiPost, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, progressBar } from '../ui.js';
 import { fmtRD, currentMonthKey } from '../format.js';
 import { monthNavHTML, bindMonthNav } from '../monthnav.js';
+import { DEFAULT_CATEGORIAS } from '../catalogos.js';
 
-let CATEGORIAS = ['Comida', 'Transporte', 'Servicios', 'Salud', 'Entretenimiento',
-  'Educación', 'Hogar', 'Ropa', 'Préstamos', 'Gastos fijos', 'Otros'];
+let CATEGORIAS = DEFAULT_CATEGORIAS;
 
 let month = null;
 

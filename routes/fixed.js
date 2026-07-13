@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db/database');
-const { isValidFechaSort, isValidMonthKey, currentMonthKey, todayLocalISO, dateInMonth, quincenaOf } = require('../lib/dates');
+const { isValidFechaSort, isValidMonthKey, currentMonthKey, todayLocalISO, dateInMonth, quincenaOf, quincenaOfDay } = require('../lib/dates');
 
 const router = express.Router();
 
@@ -47,7 +47,7 @@ router.get('/fixed-expenses', (req, res) => {
       cat: r.cat,
       metodo: r.metodo,
       activo: !!r.activo,
-      quincena: r.dia >= 16 ? 2 : 1,
+      quincena: quincenaOfDay(r.dia),
       month,
       estado: r.activo ? estadoDe(meses, month, r.dia) : 'inactivo',
       pagadosMeses: meses
@@ -126,7 +126,7 @@ router.get('/fixed-incomes', (req, res) => {
       dia: r.dia,
       cuenta: r.cuenta,
       activo: !!r.activo,
-      quincena: r.dia >= 16 ? 2 : 1,
+      quincena: quincenaOfDay(r.dia),
       month,
       recibido: meses.includes(month),
       recibidosMeses: meses

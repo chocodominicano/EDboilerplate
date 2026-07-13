@@ -47,6 +47,17 @@ export function addMonthsToKey(key, n) {
   return `${Math.floor(total / 12)}-${pad2((total % 12) + 1)}`;
 }
 
+// Suma n meses a una fecha 'yyyy-mm-dd' clampeando el día en meses cortos
+// (31 ene + 1 mes → 28/29 feb), igual que hace el backend
+export function addMonthsISO(iso, n) {
+  const key = addMonthsToKey(iso.slice(0, 7), n);
+  const d = Number(iso.slice(8, 10));
+  const y = Number(key.slice(0, 4));
+  const m = Number(key.slice(5, 7));
+  const dim = new Date(y, m, 0).getDate();
+  return `${key}-${pad2(Math.min(d, dim))}`;
+}
+
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 

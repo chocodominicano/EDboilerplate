@@ -2,12 +2,12 @@ import { apiGet, apiPost, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, openModal, progressBar } from '../ui.js';
 import { fmtRD, fmtUSD, fmtMoney, fmtFechaDDMM, todayISO, currentMonthKey } from '../format.js';
 import { monthNavHTML, bindMonthNav } from '../monthnav.js';
-import { attachMoney, moneyToNum } from '../money.js';
+import { attachMoney, moneyToNum, moneyStr } from '../money.js';
+import { DEFAULT_CATEGORIAS, DEFAULT_METODOS } from '../catalogos.js';
 
 // Catálogos administrados desde el panel admin (con fallback si fallan)
-let CATEGORIAS = ['Comida', 'Transporte', 'Servicios', 'Salud', 'Entretenimiento',
-  'Educación', 'Hogar', 'Ropa', 'Préstamos', 'Gastos fijos', 'Otros'];
-let METODOS = ['Efectivo', 'Transferencia', 'Débito'];
+let CATEGORIAS = DEFAULT_CATEGORIAS;
+let METODOS = DEFAULT_METODOS;
 
 // Cargos que el banco aplica directamente (no son consumos del usuario)
 const INTERES_TIPOS = {
@@ -503,7 +503,7 @@ function openConvertModal(viewEl, t, fixedExpAll) {
     <p class="muted small">Se creará un gasto fijo recurrente basado en esta transacción.</p>
     <form id="convert-form" class="form-grid">
       <label class="full">Concepto<input type="text" name="concepto" required value="${esc(t.nombre)}"></label>
-      <label>Monto RD$<input type="text" name="monto" inputmode="decimal" required value="${t.montoNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}"></label>
+      <label>Monto RD$<input type="text" name="monto" inputmode="decimal" required value="${moneyStr(t.montoNum)}"></label>
       <label>Día del mes<input type="number" name="dia" min="1" max="31" required value="${dia}"></label>
       <label class="full">Categoría
         <select name="cat">${CATEGORIAS.map((c) => `<option ${c === t.cat ? 'selected' : ''}>${c}</option>`).join('')}</select>
