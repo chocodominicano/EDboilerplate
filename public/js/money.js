@@ -2,19 +2,21 @@
 // Reutilizable en cualquier <input type="text">.
 
 function formatWhileTyping(raw) {
+  // signo negativo solo al inicio (p. ej. saldo a favor de una tarjeta)
+  const neg = String(raw).trimStart().startsWith('-');
   let s = String(raw).replace(/[^0-9.]/g, '');
   const firstDot = s.indexOf('.');
   if (firstDot !== -1) {
     // deja solo el primer punto decimal
     s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '');
   }
-  if (s === '' || s === '.') return s === '.' ? '0.' : '';
+  if (s === '' || s === '.') return (neg ? '-' : '') + (s === '.' ? '0.' : '');
 
   let [intPart, decPart] = s.split('.');
   intPart = intPart.replace(/^0+(?=\d)/, '') || '0';
   const intFmt = Number(intPart).toLocaleString('en-US');
-  if (s.indexOf('.') === -1) return intFmt;
-  return `${intFmt}.${(decPart || '').slice(0, 2)}`;
+  const out = s.indexOf('.') === -1 ? intFmt : `${intFmt}.${(decPart || '').slice(0, 2)}`;
+  return (neg ? '-' : '') + out;
 }
 
 export function moneyToNum(input) {

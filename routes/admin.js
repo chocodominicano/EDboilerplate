@@ -177,9 +177,11 @@ function catalogRoutes(table, label) {
   router.put(`/${table}/:id`, (req, res) => {
     const nombre = String((req.body || {}).nombre || '').trim();
     if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
+    const prev = db.prepare(`SELECT nombre FROM ${table} WHERE id = ?`).get(Number(req.params.id));
+    if (!prev) return res.status(404).json({ error: 'No existe' });
     try {
-      const info = db.prepare(`UPDATE ${table} SET nombre = ? WHERE id = ?`).run(nombre, Number(req.params.id));
-      if (!info.changes) return res.status(404).json({ error: 'No existe' });
+      db.prepare(`UPDATE ${table} SET nombre = ? WHERE id = ?`).run(nombre, Number(req.params.id));
+      if (prev.nombre !== nombre) logEvent(req.user.username, `${label} renombrada`, `${prev.nombre} → ${nombre}`, req);
       res.json({ ok: true });
     } catch {
       res.status(409).json({ error: `Ya existe: ${nombre}` });

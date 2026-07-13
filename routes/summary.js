@@ -298,6 +298,7 @@ router.get('/radar', (req, res) => {
   const rate = getExchangeRate(userId).rate;
   for (const c of db.prepare('SELECT * FROM credit_cards WHERE user_id = ? AND activo = 1').all(userId)) {
     const pagoMin = (Math.max(0, c.used_rd) + Math.max(0, c.used_usd) * rate) * c.pago_minimo_pct / 100;
+    if (pagoMin <= 0) continue; // sin deuda no hay pago que recordar
     events.push({
       dia: clampDay(c.dia_pago, y, m),
       tipo: 'pago_tarjeta',

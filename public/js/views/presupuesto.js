@@ -3,6 +3,7 @@ import { esc, toast, confirmDialog, progressBar } from '../ui.js';
 import { fmtRD, currentMonthKey } from '../format.js';
 import { monthNavHTML, bindMonthNav } from '../monthnav.js';
 import { DEFAULT_CATEGORIAS } from '../catalogos.js';
+import { attachMoney, moneyToNum } from '../money.js';
 
 let CATEGORIAS = DEFAULT_CATEGORIAS;
 
@@ -30,7 +31,7 @@ export async function render(el) {
           <select name="cat">${CATEGORIAS.map((c) => `<option>${c}</option>`).join('')}</select>
         </label>
         <label>Presupuesto mensual RD$
-          <input type="number" name="monto" step="0.01" min="0.01" required>
+          <input type="text" name="monto" inputmode="decimal" required placeholder="0.00">
         </label>
         <button type="submit" class="btn btn-primary">Guardar</button>
       </form>
@@ -63,11 +64,14 @@ export async function render(el) {
 
   bindMonthNav(el, month, (nuevo) => { month = nuevo; render(el); });
 
-  el.querySelector('#budget-form').onsubmit = async (e) => {
+  const budgetForm = el.querySelector('#budget-form');
+  attachMoney(budgetForm.monto);
+  budgetForm.onsubmit = async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
+    const monto = moneyToNum(budgetForm.monto);
+    if (monto <= 0) return toast('Ingresa un monto válido', 'error');
     try {
-      await apiPost('/api/budgets', { cat: f.get('cat'), monto: Number(f.get('monto')) });
+      await apiPost('/api/budgets', { cat: budgetForm.cat.value, monto });
       toast('Presupuesto guardado', 'success');
       render(el);
     } catch (err) {

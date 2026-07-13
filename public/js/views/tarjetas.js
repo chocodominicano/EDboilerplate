@@ -1,7 +1,7 @@
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, openModal, progressBar, overLimitBadge } from '../ui.js';
 import { fmtRD, fmtUSD, fmtFechaDDMM, todayISO, currentMonthKey } from '../format.js';
-import { attachMoney, moneyToNum } from '../money.js';
+import { attachMoney, moneyToNum, moneyStr } from '../money.js';
 import { state } from '../state.js';
 
 const CARD_ACCENTS = ['#7c6fef', '#199e70', '#3987e5', '#c98500', '#e66767'];
@@ -172,15 +172,15 @@ function openCardForm(viewEl, card) {
         </select>
       </label>
       <label>Producto<input type="text" name="producto" value="${esc(v('producto'))}" placeholder="Gold, Platinum…"></label>
-      <label>Límite RD$<input type="number" name="limitRD" step="0.01" min="0" value="${v('limitRD', 0)}"></label>
-      <label>Usado RD$<input type="number" name="usedRD" step="0.01" value="${v('usedRD', 0)}"></label>
-      <label>Límite USD$<input type="number" name="limitUSD" step="0.01" min="0" value="${v('limitUSD', 0)}"></label>
-      <label>Usado USD$<input type="number" name="usedUSD" step="0.01" value="${v('usedUSD', 0)}"></label>
+      <label>Límite RD$<input type="text" name="limitRD" inputmode="decimal" value="${moneyStr(v('limitRD', 0))}"></label>
+      <label>Usado RD$<input type="text" name="usedRD" inputmode="decimal" value="${moneyStr(v('usedRD', 0))}"></label>
+      <label>Límite USD$<input type="text" name="limitUSD" inputmode="decimal" value="${moneyStr(v('limitUSD', 0))}"></label>
+      <label>Usado USD$<input type="text" name="usedUSD" inputmode="decimal" value="${moneyStr(v('usedUSD', 0))}"></label>
       <label>Día de corte<input type="number" name="diaCorte" min="1" max="31" required value="${v('diaCorte')}"></label>
       <label>Día de pago<input type="number" name="diaPago" min="1" max="31" required value="${v('diaPago')}"></label>
       <label>% pago mínimo<input type="number" name="pagoMinimoPct" step="0.1" min="0" value="${v('pagoMinimoPct', 5)}"></label>
       <label>Tasa interés % anual<input type="number" name="tasaInteres" step="0.1" min="0" value="${v('tasaInteres', 60)}"></label>
-      <label>Alerta al llegar a RD$<input type="number" name="alertaRD" step="0.01" min="0" value="${v('alertaRD') ?? ''}"></label>
+      <label>Alerta al llegar a RD$<input type="text" name="alertaRD" inputmode="decimal" value="${v('alertaRD') != null && v('alertaRD') !== '' ? moneyStr(v('alertaRD')) : ''}" placeholder="opcional"></label>
       <label style="display:flex;align-items:center;gap:0.4rem;margin-top:1.2rem">
         <input type="checkbox" name="dobleSaldo" style="width:auto" ${v('dobleSaldo') ? 'checked' : ''}> Doble saldo (RD$ y USD$)
       </label>
@@ -191,23 +191,25 @@ function openCardForm(viewEl, card) {
     </div>
   `);
 
+  const cardForm = m.el.querySelector('#card-form');
+  ['limitRD', 'usedRD', 'limitUSD', 'usedUSD', 'alertaRD'].forEach((n) => attachMoney(cardForm[n]));
   m.el.querySelector('[data-act="cancel"]').onclick = m.close;
   m.el.querySelector('[data-act="save"]').onclick = async () => {
-    const f = new FormData(m.el.querySelector('#card-form'));
+    const f = new FormData(cardForm);
     const payload = {
       label: f.get('label'),
       bank: f.get('bank') || undefined,
       red: f.get('red') || undefined,
       producto: f.get('producto') || undefined,
-      limitRD: Number(f.get('limitRD') || 0),
-      usedRD: Number(f.get('usedRD') || 0),
-      limitUSD: Number(f.get('limitUSD') || 0),
-      usedUSD: Number(f.get('usedUSD') || 0),
+      limitRD: moneyToNum(f.get('limitRD')),
+      usedRD: moneyToNum(f.get('usedRD')),
+      limitUSD: moneyToNum(f.get('limitUSD')),
+      usedUSD: moneyToNum(f.get('usedUSD')),
       diaCorte: Number(f.get('diaCorte')),
       diaPago: Number(f.get('diaPago')),
       pagoMinimoPct: Number(f.get('pagoMinimoPct') || 5),
       tasaInteres: Number(f.get('tasaInteres') || 60),
-      alertaRD: f.get('alertaRD') ? Number(f.get('alertaRD')) : undefined,
+      alertaRD: f.get('alertaRD') ? moneyToNum(f.get('alertaRD')) : undefined,
       dobleSaldo: f.get('dobleSaldo') === 'on'
     };
     try {
@@ -229,7 +231,7 @@ function openPayForm(viewEl, card) {
     <p class="muted small">Saldo usado: ${fmtRD(card.usedRD)}${card.usedUSD ? ` + ${fmtUSD(card.usedUSD)}` : ''} ·
       Pago mínimo: ${fmtRD(card.pagoMinimoTotalRD)}</p>
     <form id="pay-form" class="form-grid">
-      <label>Monto<input type="number" name="monto" step="0.01" min="0.01" required value="${card.usedRD > 0 ? card.usedRD : ''}"></label>
+      <label>Monto<input type="text" name="monto" inputmode="decimal" required value="${card.usedRD > 0 ? moneyStr(card.usedRD) : ''}" placeholder="0.00"></label>
       <label>Moneda
         <select name="moneda"><option>RD$</option><option>USD$</option></select>
       </label>
@@ -243,12 +245,16 @@ function openPayForm(viewEl, card) {
     </div>
   `);
 
+  const payForm = m.el.querySelector('#pay-form');
+  attachMoney(payForm.monto);
   m.el.querySelector('[data-act="cancel"]').onclick = m.close;
   m.el.querySelector('[data-act="pay"]').onclick = async () => {
-    const f = new FormData(m.el.querySelector('#pay-form'));
+    const f = new FormData(payForm);
+    const monto = moneyToNum(f.get('monto'));
+    if (monto <= 0) return toast('Ingresa un monto válido', 'error');
     try {
       await apiPost(`/api/cards/${card.id}/pay`, {
-        monto: Number(f.get('monto')),
+        monto,
         moneda: f.get('moneda'),
         fechaSort: f.get('fechaSort'),
         cuenta: f.get('cuenta') || undefined

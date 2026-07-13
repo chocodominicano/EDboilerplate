@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete } from '../api.js';
+import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, openModal, progressBar } from '../ui.js';
 import { fmtRD, fmtUSD, fmtMoney, fmtFechaDDMM, todayISO, currentMonthKey } from '../format.js';
 import { monthNavHTML, bindMonthNav } from '../monthnav.js';
@@ -459,15 +459,23 @@ function txTable(txs, { budgetsMap = new Map(), cardsByKey = new Map(), showCicl
             <td>${(t.tags || []).map((g) => `<span class="tag clickable" data-tag="${esc(g)}">${esc(g)}</span>`).join('')}</td>
             <td class="right neg">−${fmtMoney(t.montoNum, t.moneda)}</td>
             <td style="white-space:nowrap">
+              ${t.loanId || t.installmentId
+                ? `<span class="badge badge-muted" title="Se gestiona desde su módulo">🔗 ${t.loanId ? 'préstamo' : 'cuota'}</span>`
+                : `<button class="btn btn-sm" data-edit-tx="${t.id}" title="Editar">✏️</button>
               <button class="btn btn-sm" data-convert="${t.id}" title="Convertir a gasto fijo">📌</button>
-              <button class="btn btn-sm btn-ghost" data-del-tx="${t.id}" title="Eliminar">🗑</button>
+              <button class="btn btn-sm btn-ghost" data-del-tx="${t.id}" title="Eliminar">🗑</button>`}
             </td>
           </tr>`).join('')}
       </tbody>
     </table></div>`;
 }
 
-function bindTxTable(body, viewEl, txs, fixedExpAll) {
+function bindTxTable(body, viewEl, txs, fixedExpAll, cards = []) {
+  body.querySelectorAll('[data-edit-tx]').forEach((b) => {
+    const t = txs.find((x) => x.id === Number(b.dataset.editTx));
+    b.onclick = () => openEditGastoModal(viewEl, t, cards);
+  });
+
   body.querySelectorAll('[data-del-tx]').forEach((b) => {
     b.onclick = async () => {
       if (!await confirmDialog('¿Eliminar este gasto? Si fue con tarjeta, el saldo usado se revierte.', { danger: true, okLabel: 'Eliminar' })) return;
@@ -491,6 +499,70 @@ function bindTxTable(body, viewEl, txs, fixedExpAll) {
     const t = txs.find((x) => x.id === Number(b.dataset.convert));
     b.onclick = () => openConvertModal(viewEl, t, fixedExpAll);
   });
+}
+
+function openEditGastoModal(viewEl, t, cards) {
+  if (!t) return;
+  const catOpts = (CATEGORIAS.includes(t.cat) || !t.cat ? CATEGORIAS : [t.cat, ...CATEGORIAS])
+    .map((c) => `<option ${c === t.cat ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  const metodoActual = t.ccKey ? `cc:${t.ccKey}` : (t.metodo || '');
+  const metodoOpts = [
+    ...METODOS.map((mo) => `<option value="${esc(mo)}" ${mo === metodoActual ? 'selected' : ''}>${esc(mo)}</option>`),
+    ...cards.map((c) => `<option value="cc:${esc(c.key)}" ${`cc:${c.key}` === metodoActual ? 'selected' : ''}>💳 ${esc(c.label)}</option>`),
+    ...(!t.ccKey && t.metodo && !METODOS.includes(t.metodo)
+      ? [`<option value="${esc(t.metodo)}" selected>${esc(t.metodo)}</option>`] : [])
+  ].join('');
+
+  const m = openModal(`
+    <h2>Editar gasto</h2>
+    <form id="edit-gasto" class="form-grid">
+      <label class="full">Descripción<input type="text" name="nombre" required value="${esc(t.nombre)}"></label>
+      <label>Monto<input type="text" name="monto" inputmode="decimal" required value="${moneyStr(t.montoNum)}"></label>
+      <label>Moneda
+        <select name="moneda">
+          <option ${t.moneda === 'RD$' ? 'selected' : ''}>RD$</option>
+          <option ${t.moneda === 'USD$' ? 'selected' : ''}>USD$</option>
+        </select>
+      </label>
+      <label>Categoría<select name="cat">${catOpts}</select></label>
+      <label>Método de pago<select name="metodo">${metodoOpts}</select></label>
+      <label>Fecha<input type="date" name="fecha" value="${esc(t.fechaSort)}" required></label>
+      <label>Tags<input type="text" name="tags" value="${esc((t.tags || []).join(', '))}"></label>
+    </form>
+    <p class="muted small">Si cambias la tarjeta o el monto, el saldo usado de las tarjetas se ajusta automáticamente.</p>
+    <div class="modal-actions">
+      <button class="btn" data-act="cancel">Cancelar</button>
+      <button class="btn btn-primary" data-act="save">Guardar cambios</button>
+    </div>
+  `);
+  const form = m.el.querySelector('#edit-gasto');
+  attachMoney(form.monto);
+  m.el.querySelector('[data-act="cancel"]').onclick = m.close;
+  m.el.querySelector('[data-act="save"]').onclick = async () => {
+    const monto = moneyToNum(form.monto);
+    if (monto <= 0) return toast('Monto inválido', 'error');
+    const metodo = form.metodo.value;
+    const card = metodo.startsWith('cc:') ? cards.find((c) => c.key === metodo.slice(3)) : null;
+    try {
+      await apiPut(`/api/transactions/${t.id}`, {
+        nombre: form.nombre.value.trim(),
+        montoNum: monto,
+        moneda: form.moneda.value,
+        cat: form.cat.value,
+        metodo: card ? card.label : metodo,
+        ccKey: card ? card.key : undefined,
+        fechaSort: form.fecha.value,
+        tags: String(form.tags.value || '').split(',').map((x) => x.trim()).filter(Boolean),
+        neg: true
+      });
+      m.close();
+      toast('Gasto actualizado', 'success');
+      month = form.fecha.value.slice(0, 7);
+      render(viewEl);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
 }
 
 function openConvertModal(viewEl, t, fixedExpAll) {
@@ -537,6 +609,7 @@ function openConvertModal(viewEl, t, fixedExpAll) {
 // ─── Modo: Por mes ───────────────────────────────────────────
 
 function renderMes(body, viewEl, monthGastos, cardsByKey, budgetsMap, fixedExpAll) {
+  const cards = [...cardsByKey.values()];
   const filtered = applyFilters(monthGastos);
   const totalRD = filtered.reduce((a, t) => a + (t.moneda === 'USD$' ? 0 : t.montoNum), 0);
   const totalUSD = filtered.reduce((a, t) => a + (t.moneda === 'USD$' ? t.montoNum : 0), 0);
@@ -551,7 +624,7 @@ function renderMes(body, viewEl, monthGastos, cardsByKey, budgetsMap, fixedExpAl
     </div>`;
   bindFilterBanner(body, viewEl);
   bindTagFilterBar(body, viewEl);
-  bindTxTable(body, viewEl, filtered, fixedExpAll);
+  bindTxTable(body, viewEl, filtered, fixedExpAll, cards);
 }
 
 // ─── Modo: Por ciclo ─────────────────────────────────────────
@@ -584,7 +657,7 @@ async function renderCiclo(body, viewEl, cards, budgetsMap, fixedExpAll) {
   };
   bindFilterBanner(body, viewEl);
   bindTagFilterBar(body, viewEl);
-  bindTxTable(body, viewEl, filtered, fixedExpAll);
+  bindTxTable(body, viewEl, filtered, fixedExpAll, cards);
 }
 
 // ─── Modo: Gastos fijos ──────────────────────────────────────
@@ -621,7 +694,7 @@ async function renderFijos(body, viewEl) {
       <h2>Gastos fijos del mes</h2>
       <form id="fixed-exp-form" class="form-grid">
         <label>Concepto<input type="text" name="concepto" required placeholder="Internet, renta…"></label>
-        <label>Monto RD$<input type="number" name="monto" step="0.01" min="0.01" required></label>
+        <label>Monto RD$<input type="text" name="monto" inputmode="decimal" required placeholder="0.00"></label>
         <label>Día del mes<input type="number" name="dia" min="1" max="31" required></label>
         <label>Categoría
           <select name="cat">${CATEGORIAS.map((c) => `<option>${c}</option>`).join('')}</select>
@@ -650,15 +723,18 @@ async function renderFijos(body, viewEl) {
     </div>
   `;
 
-  body.querySelector('#fixed-exp-form').onsubmit = async (e) => {
+  const fixedForm = body.querySelector('#fixed-exp-form');
+  attachMoney(fixedForm.monto);
+  fixedForm.onsubmit = async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
+    const monto = moneyToNum(fixedForm.monto);
+    if (monto <= 0) return toast('Ingresa un monto válido', 'error');
     try {
       await apiPost('/api/fixed-expenses', {
-        concepto: f.get('concepto'),
-        monto: Number(f.get('monto')),
-        dia: Number(f.get('dia')),
-        cat: f.get('cat')
+        concepto: fixedForm.concepto.value.trim(),
+        monto,
+        dia: Number(fixedForm.dia.value),
+        cat: fixedForm.cat.value
       });
       toast('Gasto fijo creado', 'success');
       render(viewEl);
