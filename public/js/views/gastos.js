@@ -494,9 +494,8 @@ function bindTxTable(body, viewEl, txs, fixedExpAll) {
 }
 
 function openConvertModal(viewEl, t, fixedExpAll) {
-  const dup = fixedExpAll.some((fe) =>
-    fe.concepto.toLowerCase() === t.nombre.toLowerCase() || Math.abs(fe.monto - t.montoNum) < 1);
-  if (dup) return toast('Ya existe un gasto fijo similar a este', 'error');
+  const dup = fixedExpAll.some((fe) => fe.concepto.toLowerCase() === t.nombre.toLowerCase());
+  if (dup) return toast('Ya existe un gasto fijo con ese concepto', 'error');
 
   const dia = Number(t.fechaSort.slice(8, 10));
   const m = openModal(`

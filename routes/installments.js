@@ -136,7 +136,14 @@ router.post('/:id/pay', (req, res) => {
 router.delete('/:id', (req, res) => {
   const row = findById.get(req.user.id, Number(req.params.id));
   if (!row) return res.status(404).json({ error: 'Cuota no existe' });
-  db.prepare('DELETE FROM card_installments WHERE user_id = ? AND id = ?').run(req.user.id, row.id);
+  const remove = db.transaction(() => {
+    // Sus pagos se conservan como gastos históricos normales (editables);
+    // sin esto quedarían bloqueados para siempre por el guard de installment_id
+    db.prepare('UPDATE transactions SET installment_id = NULL WHERE user_id = ? AND installment_id = ?')
+      .run(req.user.id, row.id);
+    db.prepare('DELETE FROM card_installments WHERE user_id = ? AND id = ?').run(req.user.id, row.id);
+  });
+  remove();
   res.json({ ok: true });
 });
 

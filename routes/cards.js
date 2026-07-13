@@ -13,7 +13,8 @@ const findByKey = db.prepare('SELECT * FROM credit_cards WHERE user_id = ? AND k
 const listStmt = db.prepare('SELECT * FROM credit_cards WHERE user_id = ? ORDER BY label');
 
 function pct(used, limit) {
-  if (limit <= 0) return used > 0 ? 100 : 0;
+  if (used <= 0) return 0; // sobrepago = saldo a favor, no uso negativo
+  if (limit <= 0) return 100;
   return round2((used / limit) * 100);
 }
 
@@ -45,7 +46,7 @@ function serializeCard(row, rate) {
     pagoMinimoRD,
     pagoMinimoUSD,
     pagoMinimoTotalRD: round2(pagoMinimoRD + pagoMinimoUSD * rate),
-    deudaTotalRD: round2(row.used_rd + row.used_usd * rate),
+    deudaTotalRD: round2(Math.max(0, row.used_rd) + Math.max(0, row.used_usd) * rate),
     proximoCorte: cycle.end,
     proximoPago: nextOccurrence(row.dia_pago, hoy),
     cicloActual: cycle
@@ -171,8 +172,18 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const card = findById.get(req.user.id, Number(req.params.id));
   if (!card) return res.status(404).json({ error: 'Tarjeta no existe' });
-  // Las transacciones históricas se conservan (cc_key queda huérfano)
-  db.prepare('DELETE FROM credit_cards WHERE user_id = ? AND id = ?').run(req.user.id, card.id);
+  const remove = db.transaction(() => {
+    // Borrar la tarjeta borra sus compras a cuotas en cascada (FK): antes
+    // de eso, los pagos de esas cuotas se desvinculan para que queden como
+    // gastos históricos normales y no huérfanos bloqueados.
+    db.prepare(`
+      UPDATE transactions SET installment_id = NULL
+      WHERE user_id = ? AND installment_id IN (SELECT id FROM card_installments WHERE card_id = ?)
+    `).run(req.user.id, card.id);
+    // Las transacciones históricas se conservan (cc_key queda huérfano)
+    db.prepare('DELETE FROM credit_cards WHERE user_id = ? AND id = ?').run(req.user.id, card.id);
+  });
+  remove();
   res.json({ ok: true });
 });
 

@@ -55,7 +55,7 @@ async function renderConsumos(body, viewEl, cards) {
           <div class="cc-meta">${esc(c.producto || '')}</div>
 
           <div style="margin-top:0.6rem">
-            <div class="small">RD$ · ${fmtRD(c.usedRD)} / ${fmtRD(c.limitRD)} <span class="muted">(${c.usoPctRD}%)</span> ${overLimitBadge(c.usoPctRD)}</div>
+            <div class="small">RD$ · ${fmtRD(c.usedRD)} / ${fmtRD(c.limitRD)} <span class="muted">(${c.usoPctRD}%)</span> ${overLimitBadge(c.usoPctRD)}${c.usedRD < 0 ? ` <span class="badge badge-ok">saldo a favor ${fmtRD(-c.usedRD)}</span>` : ''}</div>
             ${progressBar(c.usoPctRD)}
           </div>
 
@@ -420,15 +420,22 @@ async function openScheduleModal(ct) {
 // "nunca se liquida", justo el escenario que es crítico avisar al usuario.
 const EPSILON_NO_AMORTIZA = 0.01;
 
+// Piso del pago mínimo mensual que aplican los bancos en RD aunque el
+// porcentaje dé menos (valor típico de mercado; el % real es configurable
+// por tarjeta, este piso solo evita proyecciones irreales con saldos chicos)
+const PAGO_MINIMO_PISO_RD = 500;
+
 function proyeccion12m(cc) {
-  const tasaMens = (cc.tasaInteres || 24) / 100 / 12;
-  const pagoMinPct = (cc.pagoMinimoPct || 5) / 100;
+  // ?? y no ||: una tarjeta con 0% de interés es válida (promo) y no debe
+  // proyectarse con la tasa por defecto
+  const tasaMens = (cc.tasaInteres ?? 60) / 100 / 12;
+  const pagoMinPct = (cc.pagoMinimoPct ?? 5) / 100;
 
   let saldo = cc.usedRD;
   let intAnual = 0;
   for (let m = 0; m < 12 && saldo > 0; m++) {
     const intM = saldo * tasaMens;
-    const pagM = Math.max(saldo * pagoMinPct, 500);
+    const pagM = Math.max(saldo * pagoMinPct, PAGO_MINIMO_PISO_RD);
     if (pagM <= intM + EPSILON_NO_AMORTIZA) { intAnual = Infinity; break; }
     const capM = Math.max(0, pagM - intM);
     intAnual += intM;
@@ -440,7 +447,7 @@ function proyeccion12m(cc) {
   let mesesFull = 0;
   while (saldoPay > 1 && mesesFull < 360) {
     const iF = saldoPay * tasaMens;
-    const pF = Math.max(saldoPay * pagoMinPct, 500);
+    const pF = Math.max(saldoPay * pagoMinPct, PAGO_MINIMO_PISO_RD);
     if (pF <= iF + EPSILON_NO_AMORTIZA) { mesesFull = Infinity; break; }
     totalIntFull += iF;
     saldoPay -= (pF - iF);
@@ -460,8 +467,7 @@ async function renderSalud(body, viewEl, cards) {
   const tendMap = new Map(tendencia.map((t) => [t.key, t]));
 
   const deudaTotal = cards.reduce((a, c) => a + c.deudaTotalRD, 0);
-  const limiteTotal = cards.reduce((a, c) => a + c.limitRD + c.limitUSD, 0); // aproximado para KPI global
-  const intMesTotal = cards.reduce((a, c) => a + (c.usedRD * (c.tasaInteres / 100 / 12)), 0);
+  const intMesTotal = cards.reduce((a, c) => a + (Math.max(0, c.usedRD) * (c.tasaInteres / 100 / 12)), 0);
   const pagoMinTotal = cards.reduce((a, c) => a + c.pagoMinimoTotalRD, 0);
   const usoGlobal = cards.reduce((a, c) => a + c.limitRD, 0) > 0
     ? (cards.reduce((a, c) => a + c.usedRD, 0) / cards.reduce((a, c) => a + c.limitRD, 0)) * 100

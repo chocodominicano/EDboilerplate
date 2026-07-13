@@ -403,7 +403,14 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const loan = findById.get(req.user.id, Number(req.params.id));
   if (!loan) return res.status(404).json({ error: 'Préstamo no existe' });
-  db.prepare('DELETE FROM loans WHERE user_id = ? AND id = ?').run(req.user.id, loan.id);
+  const remove = db.transaction(() => {
+    // Sus pagos se conservan como gastos históricos normales (editables);
+    // sin esto quedarían bloqueados para siempre por el guard de loan_id
+    db.prepare('UPDATE transactions SET loan_id = NULL WHERE user_id = ? AND loan_id = ?')
+      .run(req.user.id, loan.id);
+    db.prepare('DELETE FROM loans WHERE user_id = ? AND id = ?').run(req.user.id, loan.id);
+  });
+  remove();
   res.json({ ok: true });
 });
 

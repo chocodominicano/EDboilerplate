@@ -70,7 +70,7 @@ router.put('/users/:id', (req, res) => {
   if (b.email !== undefined) {
     email = b.email ? String(b.email).trim() : null;
     if (email) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email !== 'Admin') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         return res.status(400).json({ error: 'Correo electrónico inválido' });
       }
       const dup = db.prepare('SELECT id FROM users WHERE lower(email) = lower(?) AND id != ?').get(email, u.id);

@@ -42,7 +42,7 @@ export async function render(el) {
   }
 
   const totals = { gasto_fijo: 0, ingreso_fijo: 0, pago_tarjeta: 0, cuota_tarjeta: 0, cuota_prestamo: 0 };
-  for (const ev of data.events) totals[ev.tipo] += ev.monto;
+  for (const ev of data.events) totals[ev.tipo] = (totals[ev.tipo] || 0) + ev.monto;
 
   el.innerHTML = `
     <div class="section-head">
