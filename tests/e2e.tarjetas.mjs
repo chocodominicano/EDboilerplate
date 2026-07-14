@@ -111,9 +111,9 @@ await p.screenshot({ path: `${SHOT}/29-dashboard-cuotas.png` });
 await p.click('a[data-route=radar]');
 await p.waitForSelector('.cal-grid');
 for (let i = 0; i < 20; i++) {
-  const label = await p.locator('.month-nav .label').textContent();
+  const label = await p.locator('.radar-title').textContent();
   if (label.includes('Abril') && label.includes('2026')) break;
-  await p.click('[data-mn=next]');
+  await p.click('#radar-next');
   await p.waitForTimeout(80);
 }
 await p.waitForTimeout(300);

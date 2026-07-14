@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db/database');
-const { isValidMonthKey, currentMonthKey, clampDay, todayLocalISO, dateInMonth } = require('../lib/dates');
+const { isValidMonthKey, currentMonthKey, todayLocalISO, dateInMonth, isValidFechaSort, monthKey, addMonthsToKey } = require('../lib/dates');
 const { GASTO_CLAUSE, INGRESO_CLAUSE, MONTO_RD_EXPR, rowToTx } = require('../lib/tx');
 const { getExchangeRate } = require('../lib/settings');
 const { round2 } = require('../lib/amortization');
@@ -252,15 +252,33 @@ router.get('/dashboard', (req, res) => {
   });
 });
 
-// Radar: eventos del calendario del mes (gastos fijos, ingresos fijos,
-// días de pago de tarjetas y cuotas de préstamos)
+// Radar: eventos del calendario (gastos fijos, ingresos fijos, corte y
+// pago de tarjetas, cuotas de tarjeta y de préstamos). Acepta un rango
+// explícito ?from=yyyy-mm-dd&to=yyyy-mm-dd (usado por las vistas Semana
+// y Hoy, que no se alinean con los límites de un mes) o, si no viene,
+// cae al mes completo vía ?month=yyyy-mm (vista Mes). Los eventos son
+// recurrentes por día del mes, así que se recalculan por cada mes que
+// el rango toca (una semana puede cruzar de un mes a otro).
 router.get('/radar', (req, res) => {
-  const month = req.query.month && isValidMonthKey(req.query.month) ? req.query.month : currentMonthKey();
   const userId = req.user.id;
-  const y = Number(month.slice(0, 4));
-  const m = Number(month.slice(5, 7));
   const hoy = todayLocalISO();
-  const events = [];
+
+  let from = req.query.from;
+  let to = req.query.to;
+  if (!(from && isValidFechaSort(from) && to && isValidFechaSort(to) && from <= to)) {
+    const month = req.query.month && isValidMonthKey(req.query.month) ? req.query.month : currentMonthKey();
+    from = dateInMonth(month, 1);
+    to = dateInMonth(month, 31);
+  }
+
+  const monthKeys = [];
+  let mk = monthKey(from);
+  const mkEnd = monthKey(to);
+  while (monthKeys.length < 4) {
+    monthKeys.push(mk);
+    if (mk === mkEnd) break;
+    mk = addMonthsToKey(mk, 1);
+  }
 
   const parse = (raw) => {
     try {
@@ -270,74 +288,87 @@ router.get('/radar', (req, res) => {
       return [];
     }
   };
+  const inRange = (fecha) => fecha >= from && fecha <= to;
 
-  for (const g of db.prepare('SELECT * FROM fixed_expenses WHERE user_id = ? AND activo = 1').all(userId)) {
-    const pagado = parse(g.pagados_meses).includes(month);
-    const fecha = dateInMonth(month, g.dia);
-    events.push({
-      dia: clampDay(g.dia, y, m),
-      tipo: 'gasto_fijo',
-      refId: g.id,
-      label: g.concepto,
-      monto: g.monto,
-      estado: pagado ? 'pagado' : (fecha < hoy ? 'vencido' : 'pendiente')
-    });
-  }
-
-  for (const i of db.prepare('SELECT * FROM fixed_incomes WHERE user_id = ? AND activo = 1').all(userId)) {
-    events.push({
-      dia: clampDay(i.dia, y, m),
-      tipo: 'ingreso_fijo',
-      refId: i.id,
-      label: i.descripcion,
-      monto: i.monto,
-      estado: parse(i.recibidos_meses).includes(month) ? 'recibido' : 'pendiente'
-    });
-  }
-
+  const events = [];
+  const fijosGastos = db.prepare('SELECT * FROM fixed_expenses WHERE user_id = ? AND activo = 1').all(userId);
+  const fijosIngresos = db.prepare('SELECT * FROM fixed_incomes WHERE user_id = ? AND activo = 1').all(userId);
+  const cards = db.prepare('SELECT * FROM credit_cards WHERE user_id = ? AND activo = 1').all(userId);
   const rate = getExchangeRate(userId).rate;
-  for (const c of db.prepare('SELECT * FROM credit_cards WHERE user_id = ? AND activo = 1').all(userId)) {
-    const pagoMin = (Math.max(0, c.used_rd) + Math.max(0, c.used_usd) * rate) * c.pago_minimo_pct / 100;
-    if (pagoMin <= 0) continue; // sin deuda no hay pago que recordar
-    events.push({
-      dia: clampDay(c.dia_pago, y, m),
-      tipo: 'pago_tarjeta',
-      refId: c.id,
-      label: `Pago ${c.label}`,
-      monto: round2(pagoMin),
-      estado: 'programado'
-    });
-  }
-
-  const cuotasEventos = db.prepare(`
+  const cuotasTarjeta = db.prepare(`
     SELECT ci.*, cc.dia_pago AS card_dia_pago, cc.label AS card_label FROM card_installments ci
     JOIN credit_cards cc ON cc.id = ci.card_id
     WHERE ci.user_id = ? AND ci.saldo_pendiente > 0
   `).all(userId);
-  for (const c of cuotasEventos) {
-    events.push({
-      dia: clampDay(c.card_dia_pago, y, m),
-      tipo: 'cuota_tarjeta',
-      refId: c.id,
-      label: `${c.descripcion} (${c.cuotas_pagadas + 1}/${c.num_cuotas}) — ${c.card_label}`,
-      monto: c.cuota_mensual,
-      estado: 'programado'
-    });
+  const loansActivos = db.prepare('SELECT * FROM loans WHERE user_id = ? AND activo = 1 AND saldo_pendiente > 0').all(userId);
+
+  for (const mesKey of monthKeys) {
+    for (const g of fijosGastos) {
+      const fecha = dateInMonth(mesKey, g.dia);
+      if (!inRange(fecha)) continue;
+      const pagado = parse(g.pagados_meses).includes(mesKey);
+      events.push({
+        fecha, tipo: 'gasto_fijo', refId: g.id, label: g.concepto, monto: g.monto,
+        estado: pagado ? 'pagado' : (fecha < hoy ? 'vencido' : 'pendiente'),
+        dest: 'gastos', detalle: g.metodo ? `Vía ${g.metodo}` : 'Sin método asignado'
+      });
+    }
+
+    for (const i of fijosIngresos) {
+      const fecha = dateInMonth(mesKey, i.dia);
+      if (!inRange(fecha)) continue;
+      const recibido = parse(i.recibidos_meses).includes(mesKey);
+      events.push({
+        fecha, tipo: 'ingreso_fijo', refId: i.id, label: i.descripcion, monto: i.monto,
+        estado: recibido ? 'recibido' : 'pendiente',
+        dest: 'ingresos', detalle: i.cuenta || 'Sin cuenta asignada'
+      });
+    }
+
+    for (const c of cards) {
+      // Corte: siempre visible aunque no haya saldo — el usuario necesita
+      // saber cuándo cierra el ciclo para planear compras grandes.
+      const fechaCorte = dateInMonth(mesKey, c.dia_corte);
+      if (inRange(fechaCorte)) {
+        events.push({
+          fecha: fechaCorte, tipo: 'corte_tarjeta', refId: c.id, label: `Corte ${c.label}`, monto: null,
+          estado: 'informativo', dest: 'tarjetas', detalle: 'Fecha de corte del ciclo — no es un pago'
+        });
+      }
+      const fechaPago = dateInMonth(mesKey, c.dia_pago);
+      if (inRange(fechaPago)) {
+        const pagoMin = round2((Math.max(0, c.used_rd) + Math.max(0, c.used_usd) * rate) * c.pago_minimo_pct / 100);
+        if (pagoMin > 0) { // sin deuda no hay pago que recordar
+          events.push({
+            fecha: fechaPago, tipo: 'pago_tarjeta', refId: c.id, label: `Pago ${c.label}`, monto: pagoMin,
+            estado: 'programado', dest: 'tarjetas', detalle: 'Pago mínimo del ciclo'
+          });
+        }
+      }
+    }
+
+    for (const c of cuotasTarjeta) {
+      const fecha = dateInMonth(mesKey, c.card_dia_pago);
+      if (!inRange(fecha)) continue;
+      events.push({
+        fecha, tipo: 'cuota_tarjeta', refId: c.id,
+        label: `${c.descripcion} (${c.cuotas_pagadas + 1}/${c.num_cuotas}) — ${c.card_label}`,
+        monto: c.cuota_mensual, estado: 'programado', dest: 'tarjetas', detalle: 'Cuota de compra a plazos'
+      });
+    }
+
+    for (const l of loansActivos) {
+      const fecha = dateInMonth(mesKey, l.dia_pago);
+      if (!inRange(fecha)) continue;
+      events.push({
+        fecha, tipo: 'cuota_prestamo', refId: l.id, label: `Cuota ${l.nombre}`, monto: l.cuota_mensual,
+        estado: 'programado', dest: 'prestamos', detalle: l.banco || 'Sin banco asignado'
+      });
+    }
   }
 
-  for (const l of db.prepare('SELECT * FROM loans WHERE user_id = ? AND activo = 1 AND saldo_pendiente > 0').all(userId)) {
-    events.push({
-      dia: clampDay(l.dia_pago, y, m),
-      tipo: 'cuota_prestamo',
-      refId: l.id,
-      label: `Cuota ${l.nombre}`,
-      monto: l.cuota_mensual,
-      estado: 'programado'
-    });
-  }
-
-  events.sort((a, b) => a.dia - b.dia);
-  res.json({ month, diasEnMes: clampDay(31, y, m), events });
+  events.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+  res.json({ from, to, events });
 });
 
 module.exports = router;

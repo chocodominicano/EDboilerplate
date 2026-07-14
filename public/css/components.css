@@ -606,16 +606,100 @@ tr:last-child td { border-bottom: none; }
   white-space: nowrap;
   background: var(--panel-2);
   color: var(--text);
-  cursor: default;
+  cursor: pointer;
 }
 
 .cal-event.gasto_fijo { background: var(--amber-soft); color: var(--amber); }
 .cal-event.ingreso_fijo { background: var(--green-soft); color: var(--green); }
-.cal-event.ingreso_fijo.clickable { cursor: pointer; }
 .cal-event.pago_tarjeta { background: var(--purple-soft); color: var(--purple); }
+.cal-event.corte_tarjeta { background: var(--panel-2); color: var(--muted); border: 1px dashed var(--border); }
 .cal-event.cuota_tarjeta { background: var(--viz-cuotas-soft); color: var(--viz-cuotas); }
 .cal-event.cuota_prestamo { background: var(--accent-soft); color: var(--accent); }
 .cal-event.done { opacity: 0.45; text-decoration: line-through; }
+
+.cal-more {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+  margin-top: 2px;
+}
+
+/* ─── Toolbar del radar (tabs + navegación + leyenda) ────── */
+
+.radar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.radar-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  min-width: 150px;
+  text-align: center;
+}
+
+.radar-legend { margin-left: auto; margin-top: 0; }
+
+/* ─── Radar: vista Semana ─────────────────────────────────── */
+
+.rweek-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.5rem;
+}
+
+.rweek-col {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  min-height: 160px;
+  background: var(--panel);
+}
+
+.rweek-col.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rweek-dayname { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 700; }
+.rweek-daynum { font-size: 1.2rem; font-weight: 800; margin-bottom: 0.4rem; }
+.rweek-event { white-space: normal !important; }
+.rweek-amount { font-weight: 700; font-size: 0.7rem; margin-top: 0.1rem; }
+
+/* ─── Radar: vista Hoy (agenda) ───────────────────────────── */
+
+.ragenda-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.6rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ragenda-item:hover { background: var(--panel-2); }
+
+.ragenda-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.ragenda-info { flex: 1; min-width: 0; }
+.ragenda-label { font-weight: 700; font-size: 0.9rem; }
+.ragenda-label.done { opacity: 0.55; text-decoration: line-through; }
+.ragenda-amount { font-weight: 700; font-size: 1rem; white-space: nowrap; }
 
 .legend {
   display: flex;

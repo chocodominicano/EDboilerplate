@@ -64,3 +64,12 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 export function monthLabel(key) {
   return `${MESES[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`;
 }
+
+// Suma n días de calendario a 'yyyy-mm-dd'. Date.UTC solo para contar
+// días (nunca para formatear/mostrar) — mismo patrón que lib/dates.js
+// en el servidor, seguro pese a la regla general de no usar Date+ISO.
+export function addDaysISO(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d) + n * 86400000);
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+}
