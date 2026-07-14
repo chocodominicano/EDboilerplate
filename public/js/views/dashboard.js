@@ -2,6 +2,7 @@ import { apiGet } from '../api.js';
 import { esc, progressBar, overLimitBadge } from '../ui.js';
 import { fmtRD, fmtMoney, fmtFechaDDMM, currentMonthKey, monthLabel } from '../format.js';
 import { monthNavHTML, bindMonthNav } from '../monthnav.js';
+import { navigate } from '../router.js';
 
 let month = null;
 
@@ -69,9 +70,13 @@ function debtBreakdown(dd) {
 
 export async function render(el) {
   if (!month) month = currentMonthKey();
-  const d = await apiGet(`/api/dashboard?month=${month}`);
+  const [d, goals] = await Promise.all([
+    apiGet(`/api/dashboard?month=${month}`),
+    apiGet('/api/goals').catch(() => [])
+  ]);
   const k = d.kpis;
   const dd = d.deudas;
+  const hayMetaActiva = goals.some((g) => g.activo && !g.completada);
 
   el.innerHTML = `
     <div class="section-head">
@@ -98,6 +103,12 @@ export async function render(el) {
         <div class="kpi-sub">${esc(monthLabel(d.month))}</div>
       </div>
     </div>
+
+    ${k.balance > 0 && hayMetaActiva ? `
+    <div class="card" style="border-color:var(--accent);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.6rem">
+      <span>💰 Tienes ${fmtRD(k.balance)} disponible este mes.</span>
+      <button class="btn btn-primary btn-sm" id="banner-metas">🎯 Asignar a meta</button>
+    </div>` : ''}
 
     <div class="card">
       <h2>🧾 Resumen de todas mis deudas</h2>
@@ -170,4 +181,6 @@ export async function render(el) {
     month = nuevo;
     render(el);
   });
+
+  el.querySelector('#banner-metas')?.addEventListener('click', () => navigate('metas'));
 }

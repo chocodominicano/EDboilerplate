@@ -157,6 +157,9 @@ router.put('/:id', (req, res) => {
   if (old.is_pago_tarjeta) {
     return res.status(400).json({ error: 'Los pagos de tarjeta se gestionan desde el módulo de tarjetas' });
   }
+  if (old.goal_id) {
+    return res.status(400).json({ error: 'Los abonos a metas se gestionan desde el módulo de metas' });
+  }
 
   const parsed = parseTxPayload(req.body, req.user.id);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
@@ -187,6 +190,9 @@ router.delete('/:id', (req, res) => {
   }
   if (old.installment_id) {
     return res.status(400).json({ error: 'Los pagos de cuota se gestionan desde el módulo de tarjetas' });
+  }
+  if (old.goal_id) {
+    return res.status(400).json({ error: 'Los abonos a metas se gestionan desde el módulo de metas' });
   }
 
   const remove = db.transaction(() => {

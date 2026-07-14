@@ -28,6 +28,10 @@ function migrate(db) {
   if (!loanCols.has('penalidad_pct')) {
     db.exec("ALTER TABLE loans ADD COLUMN penalidad_pct REAL NOT NULL DEFAULT 0");
   }
+
+  if (!txCols.has('goal_id')) {
+    db.exec('ALTER TABLE transactions ADD COLUMN goal_id INTEGER');
+  }
 }
 
 function createTables(db) {
@@ -90,6 +94,7 @@ function createTables(db) {
       installment_id INTEGER,
       fixed_expense_id INTEGER,
       fixed_income_id INTEGER,
+      goal_id INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_tx_user_fecha ON transactions(user_id, fecha_sort);
@@ -188,6 +193,21 @@ function createTables(db) {
       key TEXT NOT NULL,
       value TEXT NOT NULL,
       PRIMARY KEY(user_id, key)
+    );
+
+    CREATE TABLE IF NOT EXISTS goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      nombre TEXT NOT NULL,
+      objetivo REAL NOT NULL CHECK(objetivo > 0),
+      moneda TEXT NOT NULL DEFAULT 'RD$' CHECK(moneda IN ('RD$','USD$')),
+      actual REAL NOT NULL DEFAULT 0,
+      fecha_limite TEXT NOT NULL,
+      fecha_inicio TEXT NOT NULL,
+      icono TEXT NOT NULL DEFAULT '🎯',
+      color TEXT NOT NULL DEFAULT '#7c6fef',
+      activo INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 }

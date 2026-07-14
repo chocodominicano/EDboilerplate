@@ -3,11 +3,12 @@ import * as ingresos from './views/ingresos.js';
 import * as gastos from './views/gastos.js';
 import * as tarjetas from './views/tarjetas.js';
 import * as prestamos from './views/prestamos.js';
+import * as metas from './views/metas.js';
 import * as presupuesto from './views/presupuesto.js';
 import * as radar from './views/radar.js';
 import * as admin from './views/admin.js';
 
-const views = { dashboard, ingresos, gastos, tarjetas, prestamos, presupuesto, radar, admin };
+const views = { dashboard, ingresos, gastos, tarjetas, prestamos, metas, presupuesto, radar, admin };
 
 export function navigate(name) {
   location.hash = `#/${name}`;

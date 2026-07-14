@@ -19,6 +19,7 @@ app.use('/api/transactions', authRequired, require('./routes/transactions'));
 app.use('/api/cards', authRequired, require('./routes/cards'));
 app.use('/api/installments', authRequired, require('./routes/installments'));
 app.use('/api/loans', authRequired, require('./routes/loans'));
+app.use('/api/goals', authRequired, require('./routes/goals'));
 app.use('/api', authRequired, require('./routes/fixed'));
 app.use('/api/budgets', authRequired, require('./routes/budgets'));
 app.use('/api', authRequired, require('./routes/summary'));

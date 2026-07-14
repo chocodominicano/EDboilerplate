@@ -459,8 +459,8 @@ function txTable(txs, { budgetsMap = new Map(), cardsByKey = new Map(), showCicl
             <td>${(t.tags || []).map((g) => `<span class="tag clickable" data-tag="${esc(g)}">${esc(g)}</span>`).join('')}</td>
             <td class="right neg">−${fmtMoney(t.montoNum, t.moneda)}</td>
             <td style="white-space:nowrap">
-              ${t.loanId || t.installmentId
-                ? `<span class="badge badge-muted" title="Se gestiona desde su módulo">🔗 ${t.loanId ? 'préstamo' : 'cuota'}</span>`
+              ${t.loanId || t.installmentId || t.goalId
+                ? `<span class="badge badge-muted" title="Se gestiona desde su módulo">🔗 ${t.loanId ? 'préstamo' : (t.installmentId ? 'cuota' : 'meta')}</span>`
                 : `<button class="btn btn-sm" data-edit-tx="${t.id}" title="Editar">✏️</button>
               <button class="btn btn-sm" data-convert="${t.id}" title="Convertir a gasto fijo">📌</button>
               <button class="btn btn-sm btn-ghost" data-del-tx="${t.id}" title="Eliminar">🗑</button>`}
