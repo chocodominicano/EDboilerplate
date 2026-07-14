@@ -47,3 +47,24 @@ export const apiGet = (url) => request('GET', url);
 export const apiPost = (url, body) => request('POST', url, body);
 export const apiPut = (url, body) => request('PUT', url, body);
 export const apiDelete = (url) => request('DELETE', url);
+
+// Descarga binaria (PDF/Excel) con el mismo Authorization que el resto de
+// la API — un <a href> plano no puede llevar el header, así que se trae
+// como blob y se dispara la descarga con un enlace temporal.
+export async function apiDownload(url, filename) {
+  const token = getToken();
+  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Error ${res.status}`);
+  }
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objUrl);
+}

@@ -23,6 +23,7 @@ app.use('/api/goals', authRequired, require('./routes/goals'));
 app.use('/api', authRequired, require('./routes/fixed'));
 app.use('/api/budgets', authRequired, require('./routes/budgets'));
 app.use('/api', authRequired, require('./routes/summary'));
+app.use('/api/reports', authRequired, require('./routes/reports'));
 app.use('/api', authRequired, require('./routes/settings'));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));

@@ -1,6 +1,6 @@
 import os from 'os';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const BASE = process.env.BASE_URL || BASE;
+const BASE = process.env.BASE_URL || 'http://localhost:3000';
 
 const SHOT = process.env.TEST_SHOT_DIR || os.tmpdir();
 const r = []; let bad = false;
