@@ -6,19 +6,22 @@ const { logEvent } = require('../lib/log');
 const { publicUser, generarUsername, initialsOf, MAX_AVATAR_CHARS } = require('./auth');
 
 const router = express.Router();
-router.use(adminRequired);
+
+// Los catálogos (categorías y métodos de pago) son compartidos y los
+// puede mantener cualquier usuario activo — solo ELIMINAR queda
+// restringido al admin. Usuarios, aprobaciones y logs siguen solo-admin.
 
 const findById = db.prepare('SELECT * FROM users WHERE id = ?');
 
-// ─── Usuarios ───────────────────────────────────────────────
+// ─── Usuarios (solo admin) ──────────────────────────────────
 
-router.get('/users', (req, res) => {
+router.get('/users', adminRequired, (req, res) => {
   const rows = db.prepare('SELECT * FROM users ORDER BY id').all();
   res.json(rows.map((u) => ({ ...publicUser(u), createdAt: u.created_at })));
 });
 
 // Alta directa desde el panel (sin flujo de aprobación)
-router.post('/users', (req, res) => {
+router.post('/users', adminRequired, (req, res) => {
   const b = req.body || {};
   const nombre = String(b.nombre || '').trim();
   const apellido = String(b.apellido || '').trim();
@@ -45,7 +48,7 @@ router.post('/users', (req, res) => {
 });
 
 // Edición parcial: datos, acceso, rol y estado — con protecciones reales
-router.put('/users/:id', (req, res) => {
+router.put('/users/:id', adminRequired, (req, res) => {
   const u = findById.get(Number(req.params.id));
   if (!u) return res.status(404).json({ error: 'Usuario no existe' });
   const b = req.body || {};
@@ -114,7 +117,7 @@ router.put('/users/:id', (req, res) => {
   res.json(publicUser(findById.get(u.id)));
 });
 
-router.put('/users/:id/password', (req, res) => {
+router.put('/users/:id/password', adminRequired, (req, res) => {
   const u = findById.get(Number(req.params.id));
   if (!u) return res.status(404).json({ error: 'Usuario no existe' });
   const password = String((req.body || {}).password || '');
@@ -125,7 +128,7 @@ router.put('/users/:id/password', (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/users/:id/approve', (req, res) => {
+router.post('/users/:id/approve', adminRequired, (req, res) => {
   const u = findById.get(Number(req.params.id));
   if (!u) return res.status(404).json({ error: 'Usuario no existe' });
   if (u.status === 'active') return res.status(400).json({ error: 'La cuenta ya está activa' });
@@ -136,7 +139,7 @@ router.post('/users/:id/approve', (req, res) => {
 });
 
 // Eliminar usuario: borra en cascada TODOS sus datos financieros
-router.delete('/users/:id', (req, res) => {
+router.delete('/users/:id', adminRequired, (req, res) => {
   const u = findById.get(Number(req.params.id));
   if (!u) return res.status(404).json({ error: 'Usuario no existe' });
   if (u.id === req.user.id) return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
@@ -149,7 +152,7 @@ router.delete('/users/:id', (req, res) => {
 
 // ─── Logs del sistema ───────────────────────────────────────
 
-router.get('/logs', (req, res) => {
+router.get('/logs', adminRequired, (req, res) => {
   let limit = Number(req.query.limit);
   if (!Number.isInteger(limit) || limit <= 0 || limit > 1000) limit = 200;
   res.json(db.prepare('SELECT * FROM system_logs ORDER BY id DESC LIMIT ?').all(limit));
@@ -188,7 +191,7 @@ function catalogRoutes(table, label) {
     }
   });
 
-  router.delete(`/${table}/:id`, (req, res) => {
+  router.delete(`/${table}/:id`, adminRequired, (req, res) => {
     const row = db.prepare(`SELECT nombre FROM ${table} WHERE id = ?`).get(Number(req.params.id));
     if (!row) return res.status(404).json({ error: 'No existe' });
     db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(Number(req.params.id));

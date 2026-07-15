@@ -99,13 +99,55 @@ router.post('/', (req, res) => {
   const fechaInicio = b.fechaInicio || todayLocalISO();
   if (!isValidFechaSort(fechaInicio)) return res.status(400).json({ error: 'fechaInicio inválida (yyyy-mm-dd)' });
 
-  const cuota = round2(frenchPayment(original, tasaAnual, plazoMeses));
+  // Cuota personalizada: los bancos redondean distinto o incluyen seguros
+  // en la cuota, así que el valor teórico puede no cuadrar con el estado
+  // de cuenta. Se acepta cualquier cuota que amortice.
+  let cuota = round2(frenchPayment(original, tasaAnual, plazoMeses));
+  if (b.cuotaMensual !== undefined && b.cuotaMensual !== '' && b.cuotaMensual !== null) {
+    cuota = Number(b.cuotaMensual);
+    if (!Number.isFinite(cuota) || cuota <= 0) return res.status(400).json({ error: 'cuotaMensual inválida' });
+    const interesMes1 = original * tasaAnual / 100 / 12;
+    if (cuota <= interesMes1 + 0.01) {
+      return res.status(400).json({ error: `La cuota no cubre el interés mensual (RD$${round2(interesMes1)}); el préstamo nunca amortizaría` });
+    }
+    cuota = round2(cuota);
+  }
+
+  // Préstamo que ya venía pagándose antes de usar la app: se simula la
+  // amortización de esas cuotas para derivar el saldo actual, SIN crear
+  // transacciones — esos pagos no son gastos del presente ni del histórico.
+  let cuotasPagadas = 0;
+  if (b.cuotasPagadas !== undefined && b.cuotasPagadas !== '' && b.cuotasPagadas !== null) {
+    cuotasPagadas = Number(b.cuotasPagadas);
+    if (!Number.isInteger(cuotasPagadas) || cuotasPagadas < 0) {
+      return res.status(400).json({ error: 'cuotasPagadas debe ser entero >= 0' });
+    }
+  }
+  let saldo = original;
+  for (let k = 0; k < cuotasPagadas && saldo > 0; k++) {
+    const { capital } = splitCuota(saldo, tasaAnual, cuota);
+    saldo = round2(Math.max(0, saldo - capital));
+  }
+
+  // Ajuste manual del saldo al valor exacto del banco (abonos extra o
+  // cargos que la simulación no conoce)
+  if (b.saldoActual !== undefined && b.saldoActual !== '' && b.saldoActual !== null) {
+    const sa = Number(b.saldoActual);
+    if (!Number.isFinite(sa) || sa < 0 || sa > original) {
+      return res.status(400).json({ error: 'saldoActual inválido (entre 0 y el monto original)' });
+    }
+    saldo = round2(sa);
+  }
+  if (saldo <= 0) {
+    return res.status(400).json({ error: 'Con esos valores el préstamo ya estaría saldado; no hay nada que registrar' });
+  }
+
   const info = db.prepare(`
     INSERT INTO loans (user_id, nombre, banco, original, tasa_anual, plazo_meses,
-                       cuota_mensual, dia_pago, fecha_inicio, saldo_pendiente, penalidad_pct)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       cuota_mensual, dia_pago, fecha_inicio, saldo_pendiente, cuotas_pagadas, penalidad_pct)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(req.user.id, nombre, b.banco ? String(b.banco) : null, original, tasaAnual,
-    plazoMeses, cuota, diaPago, fechaInicio, original, penalidadPct);
+    plazoMeses, cuota, diaPago, fechaInicio, saldo, cuotasPagadas, penalidadPct);
 
   res.status(201).json(serializeLoan(findById.get(req.user.id, info.lastInsertRowid), req.user.id));
 });

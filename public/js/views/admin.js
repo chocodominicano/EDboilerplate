@@ -2,28 +2,26 @@ import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, openModal } from '../ui.js';
 import { state } from '../state.js';
 
-let tab = 'usuarios';
+let tab = null;
 let selectedUserId = null;
 let udTab = 'info';
 
+// Tabs disponibles según rol: los usuarios mantienen su perfil y los
+// catálogos compartidos; usuarios y logs son exclusivos del admin
+const TABS = {
+  admin: [['usuarios', 'Usuarios'], ['categorias', 'Categorías'], ['metodos', 'Métodos de pago'], ['logs', 'Logs del sistema'], ['perfil', '👤 Mi perfil']],
+  user: [['perfil', '👤 Mi perfil'], ['categorias', 'Categorías'], ['metodos', 'Métodos de pago']]
+};
+
 export async function render(el) {
-  if (state.user?.role !== 'admin') {
-    el.innerHTML = `
-      <div class="card" style="text-align:center;padding:3rem 1rem">
-        <div style="font-size:2.5rem">🔒</div>
-        <h2>Acceso restringido</h2>
-        <p class="muted">Solo el administrador puede acceder a esta sección.</p>
-      </div>`;
-    return;
-  }
+  const esAdmin = state.user?.role === 'admin';
+  const tabs = TABS[esAdmin ? 'admin' : 'user'];
+  if (!tab || !tabs.some(([id]) => id === tab)) tab = tabs[0][0];
 
   el.innerHTML = `
-    <div class="section-head"><h1>🛡️ Administración</h1></div>
+    <div class="section-head"><h1>${esAdmin ? '🛡️ Administración' : '⚙️ Mi cuenta'}</h1></div>
     <div class="tabs">
-      <button data-tab="usuarios" class="${tab === 'usuarios' ? 'active' : ''}">Usuarios</button>
-      <button data-tab="categorias" class="${tab === 'categorias' ? 'active' : ''}">Categorías</button>
-      <button data-tab="metodos" class="${tab === 'metodos' ? 'active' : ''}">Métodos de pago</button>
-      <button data-tab="logs" class="${tab === 'logs' ? 'active' : ''}">Logs del sistema</button>
+      ${tabs.map(([id, label]) => `<button data-tab="${id}" class="${tab === id ? 'active' : ''}">${label}</button>`).join('')}
     </div>
     <div id="admin-body"></div>
   `;
@@ -36,6 +34,7 @@ export async function render(el) {
   if (tab === 'usuarios') await renderUsuarios(body, el);
   else if (tab === 'categorias') await renderCatalog(body, el, 'categories', 'Categorías', 'categoría');
   else if (tab === 'metodos') await renderCatalog(body, el, 'payment_methods', 'Métodos de pago', 'método');
+  else if (tab === 'perfil') await renderPerfil(body, el);
   else await renderLogs(body);
 }
 
@@ -309,6 +308,7 @@ function openNewUserModal(viewEl) {
 
 async function renderCatalog(body, viewEl, table, titulo, singular) {
   const items = await apiGet(`/api/admin/${table}`);
+  const esAdmin = state.user?.role === 'admin';
   body.innerHTML = `
     <div class="card">
       <h2>${titulo}</h2>
@@ -317,7 +317,8 @@ async function renderCatalog(body, viewEl, table, titulo, singular) {
         <button type="submit" class="btn btn-primary">＋ Agregar</button>
       </form>
       <p class="muted small" style="margin:0.5rem 0 1rem">Se usan en los formularios de gastos y presupuesto.
-        Las transacciones ya registradas conservan su texto aunque elimines una ${singular}.</p>
+        ${esAdmin ? `Las transacciones ya registradas conservan su texto aunque elimines una ${singular}.`
+          : 'Solo el administrador puede eliminarlas.'}</p>
       ${items.length === 0 ? '<p class="empty-state">Vacío</p>' : `
       <div class="table-wrap"><table>
         <tbody>
@@ -326,7 +327,7 @@ async function renderCatalog(body, viewEl, table, titulo, singular) {
               <td>${esc(c.nombre)}</td>
               <td class="right">
                 <button class="btn btn-sm" data-rename="${c.id}" data-nombre="${esc(c.nombre)}">✏️</button>
-                <button class="btn btn-sm btn-ghost" data-del="${c.id}" data-nombre="${esc(c.nombre)}">🗑</button>
+                ${esAdmin ? `<button class="btn btn-sm btn-ghost" data-del="${c.id}" data-nombre="${esc(c.nombre)}">🗑</button>` : ''}
               </td>
             </tr>`).join('')}
         </tbody>
@@ -402,4 +403,113 @@ async function renderLogs(body) {
       </table></div>`}
     </div>
   `;
+}
+
+// ─── Tab Mi perfil (autoservicio, cualquier rol) ───────────
+
+async function renderPerfil(body, viewEl) {
+  const u = state.user;
+  body.innerHTML = `
+    <div class="split-2">
+      <div class="card">
+        <h2>Mis datos</h2>
+        <div class="avatar-picker" style="margin-bottom:0.9rem">
+          <span id="pf-avatar-preview">${avatarHTML(u, 64)}</span>
+          <div>
+            <input type="file" id="pf-avatar" accept="image/*" class="hidden">
+            <button class="btn btn-sm" id="pf-avatar-btn">📷 Cambiar foto</button>
+          </div>
+        </div>
+        <form id="pf-form" class="form-grid">
+          <label>Nombre<input type="text" name="nombre" value="${esc(u.nombre || '')}" required></label>
+          <label>Apellido<input type="text" name="apellido" value="${esc(u.apellido || '')}"></label>
+          <label>Correo<input type="text" name="email" value="${esc(u.email || '')}"></label>
+          <label>Teléfono<input type="text" name="phone" value="${esc(u.phone || '')}"></label>
+          <div class="full"><button type="submit" class="btn btn-primary">Guardar cambios</button></div>
+        </form>
+        <p class="muted small" style="margin-top:0.6rem">Usuario: <code>${esc(u.username)}</code> · rol ${u.role === 'admin' ? 'administrador' : 'usuario'}</p>
+      </div>
+
+      <div class="card">
+        <h2>Cambiar contraseña</h2>
+        <form id="pw-form" class="form-grid">
+          <label class="full">Contraseña actual<input type="password" name="actual" required autocomplete="current-password"></label>
+          <label>Nueva contraseña<input type="password" name="nueva" required minlength="4" autocomplete="new-password"></label>
+          <label>Confirmar nueva<input type="password" name="confirmar" required autocomplete="new-password"></label>
+          <p class="muted small full" id="pw-match" style="margin:0"></p>
+          <div class="full"><button type="submit" class="btn btn-primary">Actualizar contraseña</button></div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  // Avatar: mismo flujo que el registro (dataURL, máx 300KB)
+  let avatarData; // undefined = sin cambio
+  const fileInput = body.querySelector('#pf-avatar');
+  body.querySelector('#pf-avatar-btn').onclick = () => fileInput.click();
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 300 * 1024) {
+      toast('La foto es muy grande (máximo 300KB)', 'error');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      avatarData = ev.target.result;
+      body.querySelector('#pf-avatar-preview').innerHTML =
+        `<img class="avatar-circle" style="width:64px;height:64px" src="${avatarData}" alt="">`;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  body.querySelector('#pf-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      const r = await apiPut('/api/auth/me', {
+        nombre: String(f.get('nombre')).trim(),
+        apellido: String(f.get('apellido')).trim(),
+        email: String(f.get('email')).trim(),
+        phone: String(f.get('phone')).trim(),
+        avatar: avatarData
+      });
+      state.user = r.user;
+      document.getElementById('topbar-user').textContent = r.user.name || r.user.username;
+      toast('Perfil actualizado', 'success');
+      render(viewEl);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
+  const pwForm = body.querySelector('#pw-form');
+  const pwMatch = body.querySelector('#pw-match');
+  const checkMatch = () => {
+    if (!pwForm.confirmar.value) { pwMatch.textContent = ''; return; }
+    const ok = pwForm.nueva.value === pwForm.confirmar.value;
+    pwMatch.textContent = ok ? '✓ Las contraseñas coinciden' : '✗ Las contraseñas no coinciden';
+    pwMatch.style.color = ok ? 'var(--green)' : 'var(--red)';
+  };
+  pwForm.nueva.addEventListener('input', checkMatch);
+  pwForm.confirmar.addEventListener('input', checkMatch);
+
+  pwForm.onsubmit = async (e) => {
+    e.preventDefault();
+    if (pwForm.nueva.value !== pwForm.confirmar.value) {
+      return toast('Las contraseñas no coinciden', 'error');
+    }
+    try {
+      await apiPut('/api/auth/me/password', {
+        currentPassword: pwForm.actual.value,
+        newPassword: pwForm.nueva.value
+      });
+      toast('Contraseña actualizada', 'success');
+      pwForm.reset();
+      pwMatch.textContent = '';
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
 }

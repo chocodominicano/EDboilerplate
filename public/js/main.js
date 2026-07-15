@@ -23,7 +23,9 @@ function showApp() {
   loginScreen.classList.add('hidden');
   app.classList.remove('hidden');
   document.getElementById('topbar-user').textContent = state.user ? state.user.name || state.user.username : '';
-  document.getElementById('nav-admin').classList.toggle('hidden', state.user?.role !== 'admin');
+  // Visible para todos: los usuarios ven Mi perfil y catálogos;
+  // la gestión de usuarios y logs se filtra por rol dentro de la vista
+  document.getElementById('nav-admin').classList.remove('hidden');
   refreshRateChip();
   startRouter();
 }

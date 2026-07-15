@@ -1,7 +1,7 @@
 import { apiGet, apiPost, apiPut, apiDelete } from '../api.js';
 import { esc, toast, confirmDialog, openModal, progressBar } from '../ui.js';
 import { fmtRD, fmtFechaDDMM, todayISO, addMonthsISO } from '../format.js';
-import { attachMoney, moneyToNum } from '../money.js';
+import { attachMoney, moneyToNum, moneyStr } from '../money.js';
 
 export async function render(el) {
   const [loans, cards] = await Promise.all([apiGet('/api/loans'), apiGet('/api/cards')]);
@@ -136,6 +136,7 @@ function openLoanForm(viewEl) {
       <label>Plazo (meses)<input type="number" name="plazoMeses" min="1" required></label>
       <label>Día de pago<input type="number" name="diaPago" min="1" max="31" required></label>
       <label>Penalidad prepago %<input type="number" name="penalidadPct" step="0.1" min="0" max="100" value="0"></label>
+      <label>Cuota mensual RD$<input type="text" name="cuotaMensual" inputmode="decimal" placeholder="calculada automáticamente" title="Ajústala si tu banco indica otra cuota (redondeos, seguros incluidos)"></label>
       <label>Definir fechas por
         <select name="modoFecha">
           <option value="inicio">Fecha de inicio</option>
@@ -144,6 +145,14 @@ function openLoanForm(viewEl) {
         </select>
       </label>
       <label id="fecha-label">Fecha de inicio<input type="date" name="fecha" value="${todayISO()}" required></label>
+      <div id="loan-iniciado" class="full hidden" style="border:1px solid var(--border);border-radius:8px;padding:0.6rem 0.75rem">
+        <p class="small" style="margin-bottom:0.5rem">⏪ Este préstamo inició hace <strong id="li-meses">—</strong>.
+          Indica lo ya pagado — <strong>no</strong> se registrará como gastos, solo ajusta el saldo y el progreso.</p>
+        <div class="form-grid">
+          <label>Cuotas ya pagadas<input type="number" name="cuotasPagadas" min="0" value="0"></label>
+          <label>Saldo pendiente hoy RD$<input type="text" name="saldoActual" inputmode="decimal" placeholder="0.00" title="Ajústalo al valor exacto de tu estado de cuenta"></label>
+        </div>
+      </div>
     </form>
     <div id="loan-preview" class="muted small" style="margin-top:0.75rem">Cuota mensual estimada: —</div>
     <div class="modal-actions">
@@ -155,6 +164,18 @@ function openLoanForm(viewEl) {
 
   const form = m.el.querySelector('#loan-form');
   attachMoney(form.original);
+  attachMoney(form.cuotaMensual);
+  attachMoney(form.saldoActual);
+
+  // Campos con doble fuente (auto-calculado vs escrito por el usuario):
+  // en cuanto el usuario escribe, el preview deja de sobreescribirlos;
+  // si los vacía, vuelven a ser automáticos.
+  let cuotaDirty = false;
+  let saldoDirty = false;
+  let cuotasTouched = false;
+  form.cuotaMensual.addEventListener('input', () => { cuotaDirty = form.cuotaMensual.value.trim() !== ''; });
+  form.saldoActual.addEventListener('input', () => { saldoDirty = form.saldoActual.value.trim() !== ''; });
+  form.cuotasPagadas.addEventListener('input', () => { cuotasTouched = true; });
 
   const FECHA_LABELS = {
     inicio: 'Fecha de inicio',
@@ -178,22 +199,104 @@ function openLoanForm(viewEl) {
     return fecha;
   }
 
+  // Meses transcurridos completos entre la fecha de inicio y hoy —
+  // aproxima cuántas cuotas ya vencieron para el préstamo pre-existente
+  function mesesTranscurridos(inicioISO) {
+    const [y, mo] = inicioISO.split('-').map(Number);
+    const hoy = new Date();
+    return (hoy.getFullYear() - y) * 12 + (hoy.getMonth() + 1 - mo);
+  }
+
+  // Réplica de splitCuota del backend: saldo tras n cuotas pagadas
+  function simularSaldo(P, t, cuota, n) {
+    const i = t / 100 / 12;
+    let saldo = P;
+    for (let k = 0; k < n && saldo > 0; k++) {
+      const interes = saldo * i;
+      let capital = cuota - interes;
+      if (capital < 0) capital = 0;
+      if (capital > saldo || saldo - capital <= 1) capital = saldo;
+      saldo = Math.max(0, saldo - capital);
+    }
+    return saldo;
+  }
+
+  // Con una cuota distinta a la teórica el plazo real cambia
+  function plazoImplicito(P, t, cuota) {
+    const i = t / 100 / 12;
+    let s = P;
+    let meses = 0;
+    while (s > 1 && meses < 600) {
+      const int = s * i;
+      if (cuota <= int + 0.01) return Infinity;
+      s -= (cuota - int);
+      meses++;
+    }
+    return meses;
+  }
+
+  function seccionIniciadaVisible() {
+    return !m.el.querySelector('#loan-iniciado').classList.contains('hidden');
+  }
+
   function preview() {
     const P = moneyToNum(form.original);
     const t = Number(form.tasaAnual.value);
     const n = Number(form.plazoMeses.value);
     const out = m.el.querySelector('#loan-preview');
-    if (P > 0 && n > 0 && t >= 0) {
-      const cuota = frenchPaymentLocal(P, t, n);
-      const total = cuota * n;
-      const inicio = derivarInicio();
-      out.innerHTML = `Cuota mensual: <strong>${fmtRD(cuota)}</strong> · Total a pagar: ${fmtRD(total)} ·
-        Intereses totales: ${fmtRD(total - P)}${inicio ? ` · Inicio: ${esc(inicio)}` : ''}`;
-    } else {
-      out.textContent = 'Cuota mensual estimada: —';
+    const inicio = derivarInicio();
+
+    // Sección "préstamo ya iniciado" cuando la fecha quedó en el pasado
+    const meses = inicio ? Math.max(0, mesesTranscurridos(inicio)) : 0;
+    const sec = m.el.querySelector('#loan-iniciado');
+    sec.classList.toggle('hidden', meses < 1);
+    if (meses >= 1) {
+      m.el.querySelector('#li-meses').textContent = meses === 1 ? '1 mes' : `${meses} meses`;
+      if (!cuotasTouched) {
+        form.cuotasPagadas.value = n > 0 ? Math.min(meses, n - 1) : meses;
+      }
+    } else if (!cuotasTouched) {
+      form.cuotasPagadas.value = 0;
     }
+
+    if (!(P > 0 && n > 0 && t >= 0)) {
+      out.textContent = 'Cuota mensual estimada: —';
+      return;
+    }
+
+    const teorica = frenchPaymentLocal(P, t, n);
+    if (!cuotaDirty) form.cuotaMensual.value = moneyStr(teorica);
+    const cuota = cuotaDirty ? moneyToNum(form.cuotaMensual) : teorica;
+
+    const esCustom = cuotaDirty && Math.abs(cuota - teorica) > 0.5;
+    const plazoReal = esCustom ? plazoImplicito(P, t, cuota) : n;
+
+    let linea;
+    if (esCustom && !Number.isFinite(plazoReal)) {
+      linea = `⚠️ <strong style="color:var(--red)">La cuota ${fmtRD(cuota)} no cubre el interés mensual — el préstamo nunca amortizaría.</strong>`;
+    } else {
+      const total = cuota * plazoReal;
+      linea = `Cuota mensual: <strong>${fmtRD(cuota)}</strong> · Total a pagar: ${fmtRD(total)} ·
+        Intereses totales: ${fmtRD(total - P)}${inicio ? ` · Inicio: ${esc(inicio)}` : ''}`;
+      if (esCustom && plazoReal !== n) {
+        linea += `<br>⚠️ Con esta cuota el préstamo termina en <strong>${plazoReal}</strong> cuotas (plazo indicado: ${n}).`;
+      }
+    }
+
+    // Saldo simulado tras las cuotas ya pagadas
+    if (meses >= 1) {
+      const cp = Math.max(0, Number(form.cuotasPagadas.value) || 0);
+      const saldoSim = simularSaldo(P, t, cuota, cp);
+      if (!saldoDirty) form.saldoActual.value = moneyStr(saldoSim);
+      if (cp > 0) {
+        linea += `<br>⏪ Saldo simulado tras ${cp} cuota(s): <strong>${fmtRD(saldoSim)}</strong>${saldoDirty ? ` · ajustado a mano: <strong>${fmtRD(moneyToNum(form.saldoActual))}</strong>` : ''}`;
+      }
+    }
+
+    out.innerHTML = linea;
   }
   form.addEventListener('input', preview);
+  preview();
 
   // Simulador: tabla de amortización completa ANTES de crear
   m.el.querySelector('[data-act="tabla"]').onclick = () => {
@@ -230,6 +333,7 @@ function openLoanForm(viewEl) {
   m.el.querySelector('[data-act="save"]').onclick = async () => {
     const fechaInicio = derivarInicio();
     if (!fechaInicio) return toast('Completa la fecha y el plazo', 'error');
+    const iniciado = seccionIniciadaVisible();
     try {
       const loan = await apiPost('/api/loans', {
         nombre: form.nombre.value.trim(),
@@ -239,10 +343,13 @@ function openLoanForm(viewEl) {
         plazoMeses: Number(form.plazoMeses.value),
         diaPago: Number(form.diaPago.value),
         penalidadPct: Number(form.penalidadPct.value || 0),
-        fechaInicio
+        fechaInicio,
+        cuotaMensual: cuotaDirty ? moneyToNum(form.cuotaMensual) : undefined,
+        cuotasPagadas: iniciado ? Math.max(0, Number(form.cuotasPagadas.value) || 0) : undefined,
+        saldoActual: iniciado && saldoDirty ? moneyToNum(form.saldoActual) : undefined
       });
       m.close();
-      toast(`Préstamo creado — cuota ${fmtRD(loan.cuotaMensual)}`, 'success');
+      toast(`Préstamo creado — cuota ${fmtRD(loan.cuotaMensual)}${loan.cuotasPagadas > 0 ? ` · ${loan.cuotasPagadas} cuota(s) previas, saldo ${fmtRD(loan.saldoPendiente)}` : ''}`, 'success');
       render(viewEl);
     } catch (err) {
       toast(err.message, 'error');

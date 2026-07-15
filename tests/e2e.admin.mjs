@@ -128,7 +128,7 @@ check('Logs registran aprobación, registro y logins',
   logsTxt.includes('Aprobación') && logsTxt.includes('Registro de usuario') && logsTxt.includes('Login'));
 await page.screenshot({ path: `${SHOT}/21-admin-logs.png` });
 
-// ── 10. Usuario aprobado entra; sin acceso admin ──────────
+// ── 10. Usuario aprobado entra; ve "Mi cuenta" limitada ────
 await page.click('#logout-btn');
 await page.waitForSelector('#login-form:not(.hidden)');
 await page.fill('#login-user', 'pedro@test.do');
@@ -136,13 +136,46 @@ await page.fill('#login-pass', 'pedro2026');
 await page.click('#login-form button[type=submit]');
 await page.waitForSelector('#app:not(.hidden)');
 check('Usuario aprobado entra (login por correo)', true);
-const adminHidden = await page.locator('#nav-admin').isHidden();
-check('Enlace Administración oculto para rol user', adminHidden);
+check('Enlace Administración visible para rol user', await page.locator('#nav-admin').isVisible());
+
 await page.goto(BASE + '/#/admin');
-await page.waitForSelector('#view');
-await page.waitForFunction(() => document.querySelector('#view').textContent.includes('Acceso restringido'));
-check('Vista #/admin muestra "Acceso restringido" a un user', true);
-await page.screenshot({ path: `${SHOT}/22-acceso-restringido.png` });
+await page.waitForSelector('#pf-form');
+const userTabsTxt = await page.locator('#view .tabs').textContent();
+check('Usuario ve tabs Mi perfil + catálogos, sin Usuarios ni Logs',
+  userTabsTxt.includes('Mi perfil') && userTabsTxt.includes('Categorías')
+  && !userTabsTxt.includes('Usuarios') && !userTabsTxt.includes('Logs'));
+
+// Mi perfil: editar nombre actualiza el topbar
+await page.fill('#pf-form [name=apellido]', 'Martínez Prueba');
+await page.click('#pf-form button[type=submit]');
+await page.waitForFunction(() => document.querySelector('#topbar-user').textContent.includes('Martínez Prueba'));
+check('Editar perfil actualiza nombre en el topbar', true);
+// guardar re-renderiza la vista; esperar antes de usar el form de contraseña
+await page.waitForTimeout(500);
+
+// Cambio de contraseña: actual incorrecta rechaza, correcta funciona
+await page.fill('#pw-form [name=actual]', 'incorrecta');
+await page.fill('#pw-form [name=nueva]', 'nuevo2026');
+await page.fill('#pw-form [name=confirmar]', 'nuevo2026');
+await page.click('#pw-form button[type=submit]');
+await page.waitForSelector('.toast:has-text("contraseña actual es incorrecta")');
+check('Cambio de contraseña con actual incorrecta se rechaza', true);
+await page.fill('#pw-form [name=actual]', 'pedro2026');
+await page.click('#pw-form button[type=submit]');
+await page.waitForSelector('.toast:has-text("Contraseña actualizada")');
+check('Cambio de contraseña propio funciona', true);
+
+// Catálogos como user: puede agregar, no ve eliminar
+await page.click('[data-tab=categorias]');
+await page.waitForSelector('#cat-form');
+await page.fill('#cat-form [name=nombre]', 'Categoría de Pedro');
+await page.click('#cat-form button[type=submit]');
+await page.waitForSelector('td:has-text("Categoría de Pedro")');
+check('Usuario normal puede agregar categoría', true);
+check('Usuario normal ve renombrar pero no eliminar',
+  (await page.locator('#admin-body [data-rename]').count()) > 0
+  && (await page.locator('#admin-body [data-del]').count()) === 0);
+await page.screenshot({ path: `${SHOT}/22-mi-cuenta-user.png` });
 
 await browser.close();
 console.log(results.join('\n'));

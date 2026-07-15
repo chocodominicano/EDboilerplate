@@ -54,7 +54,10 @@ await p.fill('#card-form [name=diaCorte]', '5');
 await p.fill('#card-form [name=diaPago]', '20');
 await p.click('[data-act=save]');
 await p.waitForSelector('.modal', { state: 'detached' });
-ck('D1 tarjeta: creada con límite 150,000.00', (await p.locator('#view').textContent()).includes('150,000.00'));
+// la vista se re-renderiza async tras guardar; esperar la tarjeta en vez
+// de leer el texto de inmediato
+await p.waitForSelector('.cc-card:has-text("150,000.00")');
+ck('D1 tarjeta: creada con límite 150,000.00', true);
 
 // ── D2: crear gasto y editarlo ──
 await p.click('a[data-route=gastos]');

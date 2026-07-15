@@ -184,6 +184,71 @@ router.get('/me', authRequired, (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
+// ─── Autoservicio de perfil ─────────────────────────────────
+// Cualquier usuario activo edita SUS datos de presentación y contacto.
+// Rol, estado y username quedan fuera — esos los gestiona el admin.
+
+router.put('/me', authRequired, (req, res) => {
+  const u = findById.get(req.user.id);
+  if (!u) return res.status(401).json({ error: 'Usuario no existe' });
+  const b = req.body || {};
+
+  const nombre = b.nombre !== undefined ? String(b.nombre).trim() : u.nombre;
+  const apellido = b.apellido !== undefined ? String(b.apellido).trim() : u.apellido;
+  if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
+  const name = `${nombre} ${apellido || ''}`.trim();
+
+  let email = u.email;
+  if (b.email !== undefined) {
+    email = b.email ? String(b.email).trim() : null;
+    if (email) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: 'Correo electrónico inválido' });
+      }
+      const dup = db.prepare('SELECT id FROM users WHERE lower(email) = lower(?) AND id != ?').get(email, u.id);
+      if (dup) return res.status(409).json({ error: 'Ese correo ya está en uso por otro usuario' });
+    }
+  }
+
+  let avatar = u.avatar;
+  if (b.avatar !== undefined) {
+    avatar = b.avatar ? String(b.avatar) : null;
+    if (avatar && (!avatar.startsWith('data:image/') || avatar.length > MAX_AVATAR_CHARS)) {
+      return res.status(400).json({ error: 'Avatar inválido o muy grande (máximo ~300KB)' });
+    }
+  }
+
+  db.prepare(`
+    UPDATE users SET name=?, nombre=?, apellido=?, email=?, phone=?, avatar=?, initials=?
+    WHERE id=?
+  `).run(name, nombre, apellido, email,
+    b.phone !== undefined ? (b.phone ? String(b.phone).trim() : null) : u.phone,
+    avatar, initialsOf(nombre, apellido, name), u.id);
+
+  logEvent(req.user.username, 'Perfil actualizado', `${u.username} editó su perfil`, req);
+  res.json({ user: publicUser(findById.get(u.id)) });
+});
+
+// Cambio de contraseña propio: exige la contraseña actual
+router.put('/me/password', authRequired, (req, res) => {
+  const u = findById.get(req.user.id);
+  if (!u) return res.status(401).json({ error: 'Usuario no existe' });
+  const b = req.body || {};
+  const actual = String(b.currentPassword || '');
+  const nueva = String(b.newPassword || '');
+
+  // 400 y no 401: un 401 en rutas autenticadas significa "sesión expirada"
+  // para el cliente (cierra la sesión); esto es un error de formulario
+  if (!bcrypt.compareSync(actual, u.password_hash)) {
+    return res.status(400).json({ error: 'La contraseña actual es incorrecta' });
+  }
+  if (nueva.length < 4) return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 4 caracteres' });
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(nueva, 10), u.id);
+  logEvent(req.user.username, 'Cambio de contraseña', `${u.username} cambió su propia contraseña`, req);
+  res.json({ ok: true });
+});
+
 module.exports = router;
 module.exports.publicUser = publicUser;
 module.exports.generarUsername = generarUsername;
