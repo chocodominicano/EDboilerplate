@@ -60,6 +60,10 @@ ck('D1 tarjeta: creada con límite 150,000.00', (await p.locator('#view').textCo
 await p.click('a[data-route=gastos]');
 await p.waitForSelector('[data-tab=mes]');
 await p.click('[data-tab=mes]');
+// el clic en la tab re-renderiza la vista async; esperar a que el DOM
+// se estabilice antes de llenar el formulario (evita que el re-render
+// borre lo escrito)
+await p.waitForTimeout(600);
 await p.waitForSelector('#expense-form');
 await p.fill('#expense-form [name=nombre]', 'Cine QA');
 await p.locator('#expense-form [name=monto]').click();
