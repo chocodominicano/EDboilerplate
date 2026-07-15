@@ -6,3 +6,5 @@ tests/.tmp/
 *.db
 *.db-shm
 *.db-wal
+.claude/
+skills-lock.json
